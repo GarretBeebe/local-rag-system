@@ -24,6 +24,10 @@ splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=100
 )
 
+COLLECTION = "documents"
+
+VECTOR_SIZE = 768
+
 def ensure_collection(vector_size):
 
     if not client.collection_exists(COLLECTION):
@@ -62,6 +66,8 @@ def load_files():
 
 
 def index_file(path):
+
+    ensure_collection()
 
     text = path.read_text()
 
