@@ -28,20 +28,17 @@ COLLECTION = "documents"
 
 VECTOR_SIZE = 768
 
-def ensure_collection(vector_size):
-
+def ensure_collection():
     if not client.collection_exists(COLLECTION):
-
-        print("Creating collection:", COLLECTION)
+        print("Collection missing — creating new collection")
 
         client.create_collection(
             collection_name=COLLECTION,
             vectors_config=VectorParams(
-                size=vector_size,
-                distance=Distance.COSINE
-            )
+                size=VECTOR_SIZE,
+                distance=Distance.COSINE,
+            ),
         )
-
 
 def embed(text):
 
@@ -67,7 +64,7 @@ def load_files():
 
 def index_file(path):
 
-    ensure_collection(VECTOR_SIZE)
+    ensure_collection()
 
     text = path.read_text()
 
