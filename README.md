@@ -79,7 +79,7 @@ rag-system/
 └── README.md
 ```
 
-Documents placed in the **documents directory** become part of the searchable knowledge base once processed by the ingestion pipeline.
+The paths watched for indexing are configured in `config/watcher_config.yaml`. Any file matching the allowed extensions in a configured watch path will be processed into the knowledge base.
 
 ------------------------------------------------------------------------
 
