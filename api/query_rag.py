@@ -10,18 +10,21 @@ Can be run directly as a script for interactive querying:
   python api/query_rag.py
 """
 
+from typing import Any
+
 import requests
-from typing import List, Dict, Any
 
 from api.retrieval import retrieve_best
-from settings import OLLAMA_BASE_URL, GEN_MODEL
+from settings import GEN_MODEL, OLLAMA_BASE_URL
 
 
-def build_prompt(question: str, chunks: List[Dict[str, Any]]) -> str:
+def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
     context_blocks = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
-        cite = f"[S{i}] {p.get('filepath', p.get('filename', 'unknown'))} (chunk {p.get('chunk_index', '?')}/{p.get('chunk_total', '?')})"
+        source = p.get("filepath", p.get("filename", "unknown"))
+        chunk_ref = f"{p.get('chunk_index', '?')}/{p.get('chunk_total', '?')}"
+        cite = f"[S{i}] {source} (chunk {chunk_ref})"
         context_blocks.append(f"{cite}\n{p['text']}")
 
     context = "\n\n---\n\n".join(context_blocks)

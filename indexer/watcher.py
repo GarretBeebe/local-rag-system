@@ -10,16 +10,19 @@ config/watcher_config.yaml. Run from the project root:
   python indexer/watcher.py
 """
 
-import time
 import hashlib
-import yaml
 import threading
-from queue import Queue
+import time
 from pathlib import Path
-from watchdog.observers import Observer
+from queue import Queue
+
+import yaml
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
+from ingest.index_documents import delete_document, index_file
 from settings import CONFIG_PATH
-from ingest.index_documents import index_file, delete_document
+
 
 def load_config():
     with open(CONFIG_PATH) as f:

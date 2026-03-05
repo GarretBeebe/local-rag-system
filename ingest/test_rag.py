@@ -10,8 +10,9 @@ import uuid
 
 from qdrant_client.models import PointStruct
 
-from settings import COLLECTION, qdrant_client
 from ingest.index_documents import embed, ensure_collection
+from settings import COLLECTION, qdrant_client
+
 
 def store_document(text: str) -> None:
     qdrant_client.upsert(

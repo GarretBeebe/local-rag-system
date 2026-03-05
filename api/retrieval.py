@@ -13,17 +13,18 @@ returns the top-ranked chunks ready to be passed to the LLM.
 from __future__ import annotations
 
 import math
-import requests
-from typing import List, Dict, Any
+from typing import Any
 
+import requests
 from sentence_transformers import CrossEncoder
+
 from api.keyword_index import KeywordIndex
-from settings import COLLECTION, OLLAMA_BASE_URL, EMBED_MODEL, RERANK_MODEL, qdrant_client
+from settings import COLLECTION, EMBED_MODEL, OLLAMA_BASE_URL, RERANK_MODEL, qdrant_client
 
 reranker = CrossEncoder(RERANK_MODEL, device="cpu")
 keyword_index = KeywordIndex()
 
-def embed(text: str) -> List[float]:
+def embed(text: str) -> list[float]:
     r = requests.post(
         f"{OLLAMA_BASE_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
@@ -33,8 +34,8 @@ def embed(text: str) -> List[float]:
     return r.json()["embedding"]
 
 
-def cosine(a: List[float], b: List[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+def cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0.0 or nb == 0.0:
@@ -42,7 +43,7 @@ def cosine(a: List[float], b: List[float]) -> float:
     return dot / (na * nb)
 
 
-def qdrant_recall(question_vec: List[float], limit: int = 30) -> List[Dict[str, Any]]:
+def qdrant_recall(question_vec: list[float], limit: int = 30) -> list[dict[str, Any]]:
     """Returns candidate chunks with payload + vector (vector needed for MMR)."""
     res = qdrant_client.query_points(
         collection_name=COLLECTION,
@@ -58,11 +59,11 @@ def qdrant_recall(question_vec: List[float], limit: int = 30) -> List[Dict[str, 
 
 
 def mmr_select(
-    question_vec: List[float],
-    candidates: List[Dict[str, Any]],
+    question_vec: list[float],
+    candidates: list[dict[str, Any]],
     top_n: int = 8,
     lambda_mult: float = 0.7,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     selected = []
     remaining = candidates[:]
 
@@ -82,7 +83,7 @@ def mmr_select(
     return selected
 
 
-def rerank(question: str, candidates: List[Dict[str, Any]], top_n: int = 6) -> List[Dict[str, Any]]:
+def rerank(question: str, candidates: list[dict[str, Any]], top_n: int = 6) -> list[dict[str, Any]]:
     """Cross-encoder reranking: scores (question, chunk) pairs directly."""
     if not candidates:
         return []
@@ -90,7 +91,7 @@ def rerank(question: str, candidates: List[Dict[str, Any]], top_n: int = 6) -> L
     pairs = [(question, c["payload"]["text"]) for c in candidates]
     scores = reranker.predict(pairs)
 
-    for c, s in zip(candidates, scores):
+    for c, s in zip(candidates, scores, strict=False):
         c["rerank_score"] = float(s)
 
     return sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_n]
@@ -98,9 +99,9 @@ def rerank(question: str, candidates: List[Dict[str, Any]], top_n: int = 6) -> L
 
 def hybrid_recall(
     question: str,
-    question_vec: List[float],
+    question_vec: list[float],
     limit: int = 20,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     vector_results = qdrant_recall(question_vec, limit=limit)
     keyword_results = keyword_index.search(question, limit=limit)
 
@@ -117,7 +118,7 @@ def retrieve_best(
     recall_k: int = 30,
     mmr_k: int = 10,
     final_k: int = 6,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     qvec = embed(question)
     candidates = hybrid_recall(question, qvec, limit=recall_k)
 

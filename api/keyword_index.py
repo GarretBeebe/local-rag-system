@@ -7,6 +7,7 @@ in the hybrid retrieval pipeline.
 """
 
 from rank_bm25 import BM25Okapi
+
 from settings import COLLECTION, qdrant_client
 
 
@@ -37,5 +38,5 @@ class KeywordIndex:
     def search(self, query: str, limit: int = 10):
         tokens = query.lower().split()
         scores = self.bm25.get_scores(tokens)
-        ranked = sorted(zip(scores, self.meta), reverse=True, key=lambda x: x[0])
+        ranked = sorted(zip(scores, self.meta, strict=False), reverse=True, key=lambda x: x[0])
         return [{"payload": payload, "bm25_score": score} for score, payload in ranked[:limit]]

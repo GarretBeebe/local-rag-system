@@ -11,11 +11,9 @@ Can also be run directly as a script to batch-index the documents directory:
 """
 
 import uuid
-import requests
 from pathlib import Path
-from typing import List
 
-from tqdm import tqdm
+import requests
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client.models import (
     Distance,
@@ -25,8 +23,17 @@ from qdrant_client.models import (
     PointStruct,
     VectorParams,
 )
+from tqdm import tqdm
 
-from settings import ALLOWED_EXTENSIONS, COLLECTION, DOCS_PATH, EMBED_MODEL, OLLAMA_BASE_URL, VECTOR_SIZE, qdrant_client
+from settings import (
+    ALLOWED_EXTENSIONS,
+    COLLECTION,
+    DOCS_PATH,
+    EMBED_MODEL,
+    OLLAMA_BASE_URL,
+    VECTOR_SIZE,
+    qdrant_client,
+)
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
@@ -43,7 +50,7 @@ def ensure_collection() -> None:
         )
 
 
-def embed(text: str) -> List[float]:
+def embed(text: str) -> list[float]:
     r = requests.post(
         f"{OLLAMA_BASE_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
@@ -53,7 +60,7 @@ def embed(text: str) -> List[float]:
     return r.json()["embedding"]
 
 
-def load_files() -> List[Path]:
+def load_files() -> list[Path]:
     return [p for p in DOCS_PATH.rglob("*") if p.is_file() and p.suffix in ALLOWED_EXTENSIONS]
 
 
