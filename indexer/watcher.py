@@ -66,7 +66,11 @@ class DocumentWatcher(FileSystemEventHandler):
 
             print(f"Indexing updated file: {path}")
 
-            index_file(path)
+            # index_file(path)
+
+            print(f"Indexing updated file: {path}")
+
+            index_file(Path(path))
 
             self.file_hashes[path] = file_hash
 

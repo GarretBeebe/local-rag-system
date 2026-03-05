@@ -97,6 +97,27 @@ def index_file(path):
         points=points
     )
 
+def delete_document(filepath):
+    """
+    Remove all chunks belonging to a file from Qdrant.
+    """
+
+    print(f"Deleting vectors for: {filepath}")
+
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+    client.delete(
+        collection_name=COLLECTION,
+        points_selector=Filter(
+            must=[
+                FieldCondition(
+                    key="filepath",
+                    match=MatchValue(value=filepath)
+                )
+            ]
+        )
+    )
+
 def main():
 
     files = load_files()

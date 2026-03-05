@@ -20,11 +20,11 @@ watch_paths:
     recursive: true
     description: "Various scripts"
 
-  - path: ~/Nextcloud/RAG/Splunk   
+  - path: ~/Nextcloud/Splunk   
     recursive: true
     description: "Splunk Documents"
 
-  - path: ~/Nextcloud/RAG/"Software Engineering"   
+  - path: ~/Nextcloud/"Software Engineering"   
     recursive: true
     description: "Software engineering docs"
 
