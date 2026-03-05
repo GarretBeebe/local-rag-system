@@ -4,7 +4,7 @@ watch_paths:
     recursive: true
     description: "Local development repositories"
 
-  - path: ~/"Machine Learning"
+  - path: ~/'Machine Learning'
     recursive: true
     description: "Machine learning projects"
 
@@ -12,7 +12,7 @@ watch_paths:
     recursive: true
     description: "Machine learning notes"
 
-  - path: ~/Nextcloud/"My Computer Setup"
+  - path: ~/Nextcloud/'My Computer Setup'
     recursive: true
     description: "Computer setup scripts"
 
@@ -24,7 +24,7 @@ watch_paths:
     recursive: true
     description: "Splunk Documents"
 
-  - path: ~/Nextcloud/"Software Engineering"   
+  - path: ~/Nextcloud/'Software Engineering'   
     recursive: true
     description: "Software engineering docs"
 
