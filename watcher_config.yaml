@@ -1,0 +1,54 @@
+watch_paths:
+
+  - path: ~/Code
+    recursive: true
+    description: "Local development repositories"
+
+  - path: ~/"Machine Learning"
+    recursive: true
+    description: "Machine learning projects"
+
+  - path: ~/Nextcloud/AI-ML
+    recursive: true
+    description: "Machine learning notes"
+
+  - path: ~/Nextcloud/"My Computer Setup"
+    recursive: true
+    description: "Computer setup scripts"
+
+  - path: ~/Nextcloud/Scripts
+    recursive: true
+    description: "Various scripts"
+
+  - path: ~/Nextcloud/RAG/Splunk   
+    recursive: true
+    description: "Splunk Documents"
+
+  - path: ~/Nextcloud/RAG/"Software Engineering"   
+    recursive: true
+    description: "Software engineering docs"
+
+allowed_extensions:
+
+  - .md
+  - .txt
+  - .py
+  - .json
+  - .yaml
+  - .yml
+  - .toml
+
+
+ignore_patterns:
+
+  - ".git"
+  - "__pycache__"
+  - "node_modules"
+  - ".venv"
+  - "dist"
+  - "build"
+  - ".nextcloudsync.log"
+
+
+hash_algorithm: sha256
+debounce_seconds: 2
