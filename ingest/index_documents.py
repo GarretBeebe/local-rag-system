@@ -67,7 +67,7 @@ def load_files():
 
 def index_file(path):
 
-    ensure_collection()
+    ensure_collection(VECTOR_SIZE)
 
     text = path.read_text()
 
