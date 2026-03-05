@@ -1,3 +1,15 @@
+"""
+Filesystem watcher for continuous background document indexing.
+
+On startup, performs an initial scan of all configured watch paths, then
+keeps watching for file system events. File changes are deduplicated by
+SHA-256 hash before being passed to the ingest pipeline.
+
+Watch paths, allowed extensions, and ignore patterns are configured in
+config/watcher_config.yaml. Run from the project root:
+  python indexer/watcher.py
+"""
+
 import time
 import hashlib
 import yaml
@@ -87,7 +99,6 @@ class WatchHandler(FileSystemEventHandler):
 
     def on_deleted(self, event) -> None:
         if not event.is_directory:
-            print(f"Deleting vectors for {event.src_path}")
             delete_document(event.src_path)
 
 

@@ -1,81 +1,49 @@
-import requests
+"""
+Minimal end-to-end smoke test for the RAG pipeline.
+
+Embeds a single hardcoded document, stores it in Qdrant, then runs a
+search query to verify that embedding, storage, and retrieval all work.
+Run this after standing up Qdrant and pulling the embedding model.
+"""
+
+import sys
 import uuid
+from pathlib import Path
 
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import PointStruct
 
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
-
-MODEL = "nomic-embed-text"
-COLLECTION = "documents"
-
-client = QdrantClient(host="localhost", port=6333)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from settings import COLLECTION, qdrant_client
+from ingest.index_documents import embed, ensure_collection
 
 
-def embed(text):
-
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": MODEL,
-            "prompt": text
-        },
-    )
-
-    return response.json()["embedding"]
-
-
-def create_collection(vector_size):
-
-    if not client.collection_exists(COLLECTION):
-
-        client.create_collection(
-            collection_name=COLLECTION,
-            vectors_config=VectorParams(
-                size=vector_size,
-                distance=Distance.COSINE
-            ),
-        )
-
-
-def store_document(text):
-
-    vector = embed(text)
-
-    client.upsert(
+def store_document(text: str) -> None:
+    qdrant_client.upsert(
         collection_name=COLLECTION,
         points=[
             PointStruct(
                 id=str(uuid.uuid4()),
-                vector=vector,
-                payload={"text": text}
+                vector=embed(text),
+                payload={"text": text},
             )
         ],
     )
 
 
-def search(query):
-
+def search(query: str) -> None:
     vector = embed(query)
-
-    results = client.query_points(
+    results = qdrant_client.query_points(
         collection_name=COLLECTION,
         query=vector,
-        limit=3
+        limit=3,
     )
-
     for r in results.points:
         print(r.payload["text"], "score:", r.score)
 
 
 if __name__ == "__main__":
-
     text = "Retrieval augmented generation combines vector search with language models."
 
-    vector = embed(text)
-
-    create_collection(len(vector))
-
+    ensure_collection()
     store_document(text)
-
     search("What is RAG?")

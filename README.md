@@ -56,15 +56,15 @@ This architecture follows modern **multi-stage RAG retrieval pipelines** used in
 
 ```text
 rag-system/
+├── settings.py               # Shared constants and Qdrant client (project-wide)
 ├── api/
-│   ├── settings.py           # Shared constants and Qdrant client
 │   ├── query_rag.py          # RAG query pipeline and LLM generation
 │   ├── retrieval.py          # Hybrid retrieval, MMR, and reranking
 │   └── keyword_index.py      # BM25 keyword index
 ├── ingest/
 │   ├── index_documents.py    # Document chunking and vector ingestion
 │   ├── reset_collection.py   # Wipe the Qdrant collection
-│   └── test_rag.py           # Basic end-to-end test
+│   └── test_rag.py           # Basic end-to-end smoke test
 ├── indexer/
 │   ├── __init__.py
 │   └── watcher.py            # Filesystem watcher for auto-indexing

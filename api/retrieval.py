@@ -1,8 +1,24 @@
+"""
+Multi-stage retrieval pipeline: hybrid recall, MMR diversification, and reranking.
+
+Pipeline stages:
+  1. hybrid_recall  — combines Qdrant vector search with BM25 keyword search
+  2. mmr_select     — applies Maximal Marginal Relevance to diversify results
+  3. rerank         — scores (question, chunk) pairs with a cross-encoder model
+
+Entry point for callers is retrieve_best(), which runs all three stages and
+returns the top-ranked chunks ready to be passed to the LLM.
+"""
+
 from __future__ import annotations
 
+import sys
 import math
 import requests
+from pathlib import Path
 from typing import List, Dict, Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sentence_transformers import CrossEncoder
 from keyword_index import KeywordIndex

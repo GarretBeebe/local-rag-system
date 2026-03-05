@@ -1,3 +1,15 @@
+"""
+BM25 keyword index over the full Qdrant document collection.
+
+KeywordIndex loads all stored chunks at startup and builds an in-memory
+BM25 index for fast keyword-based recall. Used alongside vector search
+in the hybrid retrieval pipeline.
+"""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from rank_bm25 import BM25Okapi
 from settings import COLLECTION, qdrant_client
 

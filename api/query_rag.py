@@ -1,5 +1,21 @@
+"""
+RAG query interface: retrieves relevant chunks and generates an answer via Ollama.
+
+ask(question) runs the full pipeline:
+  1. Retrieve top-ranked chunks via retrieval.retrieve_best()
+  2. Build a citation-aware prompt
+  3. Send the prompt to the local LLM and print the response with source citations
+
+Can be run directly as a script for interactive querying:
+  python api/query_rag.py
+"""
+
+import sys
 import requests
+from pathlib import Path
 from typing import List, Dict, Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from retrieval import retrieve_best
 from settings import OLLAMA_BASE_URL, GEN_MODEL
