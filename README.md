@@ -57,6 +57,7 @@ This architecture follows modern **multi-stage RAG retrieval pipelines** used in
 ```text
 rag-system/
 ├── api/
+│   ├── settings.py           # Shared constants and Qdrant client
 │   ├── query_rag.py          # RAG query pipeline and LLM generation
 │   ├── retrieval.py          # Hybrid retrieval, MMR, and reranking
 │   └── keyword_index.py      # BM25 keyword index

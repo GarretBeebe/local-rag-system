@@ -1,15 +1,11 @@
 import requests
 from typing import List, Dict, Any
 
-# from api.retrieval import retrieve_best
 from retrieval import retrieve_best
-
-OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
-GEN_MODEL = "qwen2.5-coder:14b"
+from settings import OLLAMA_BASE_URL, GEN_MODEL
 
 
 def build_prompt(question: str, chunks: List[Dict[str, Any]]) -> str:
-    # Provide structured citations
     context_blocks = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
@@ -38,7 +34,7 @@ Answer:
 
 def generate(prompt: str) -> str:
     r = requests.post(
-        OLLAMA_GENERATE_URL,
+        f"{OLLAMA_BASE_URL}/api/generate",
         json={"model": GEN_MODEL, "prompt": prompt, "stream": False},
         timeout=120,
     )

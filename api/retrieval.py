@@ -2,33 +2,19 @@ from __future__ import annotations
 
 import math
 import requests
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
-from qdrant_client import QdrantClient
 from sentence_transformers import CrossEncoder
 from keyword_index import KeywordIndex
+from settings import COLLECTION, OLLAMA_BASE_URL, EMBED_MODEL, RERANK_MODEL, qdrant_client
 
-
-# ---- Ollama ----
-OLLAMA_EMBED_URL = "http://localhost:11434/api/embeddings"
-EMBED_MODEL = "nomic-embed-text"
-
-# ---- Qdrant ----
-COLLECTION = "documents"
-client = QdrantClient(host="localhost", port=6333)
-
-# ---- Reranker ----
-# Strong default reranker (CPU-friendly). If you want higher quality later:
-# "BAAI/bge-reranker-large" (slower) or "BAAI/bge-reranker-v2-m3" (if supported)
-RERANK_MODEL = "BAAI/bge-reranker-base"
 reranker = CrossEncoder(RERANK_MODEL, device="cpu")
-
 keyword_index = KeywordIndex()
 
 
 def embed(text: str) -> List[float]:
     r = requests.post(
-        OLLAMA_EMBED_URL,
+        f"{OLLAMA_BASE_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
         timeout=60,
     )
@@ -37,76 +23,48 @@ def embed(text: str) -> List[float]:
 
 
 def cosine(a: List[float], b: List[float]) -> float:
-    # small, safe cosine for MMR
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        na += x * x
-        nb += y * y
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
     if na == 0.0 or nb == 0.0:
         return 0.0
-    return dot / math.sqrt(na * nb)
+    return dot / (na * nb)
 
 
-def qdrant_recall(question: str, limit: int = 30) -> List[Dict[str, Any]]:
-    """
-    Returns candidate chunks with payload + vector (vector needed for MMR).
-    """
-    qvec = embed(question)
-
-    res = client.query_points(
+def qdrant_recall(question_vec: List[float], limit: int = 30) -> List[Dict[str, Any]]:
+    """Returns candidate chunks with payload + vector (vector needed for MMR)."""
+    res = qdrant_client.query_points(
         collection_name=COLLECTION,
-        query=qvec,
+        query=question_vec,
         limit=limit,
         with_payload=True,
         with_vectors=True,
     )
-
-    points: List[Dict[str, Any]] = []
-    for p in res.points:
-        points.append(
-            {
-                "id": p.id,
-                "score": p.score,
-                "vector": p.vector,
-                "payload": p.payload,
-            }
-        )
-    return points
+    return [
+        {"id": p.id, "score": p.score, "vector": p.vector, "payload": p.payload}
+        for p in res.points
+    ]
 
 
-def mmr_select(question_vec, candidates, top_n=8, lambda_mult=0.7):
-
+def mmr_select(
+    question_vec: List[float],
+    candidates: List[Dict[str, Any]],
+    top_n: int = 8,
+    lambda_mult: float = 0.7,
+) -> List[Dict[str, Any]]:
     selected = []
     remaining = candidates[:]
 
     while remaining and len(selected) < top_n:
-
-        best = None
-        best_score = -1e9
-
-        for c in remaining:
-
+        def mmr_score(c):
             sim_to_query = cosine(question_vec, c["vector"])
-
-            if not selected:
-                diversity_penalty = 0.0
-            else:
-                max_sim_to_selected = max(
-                    cosine(c["vector"], s["vector"]) for s in selected
-                )
-                diversity_penalty = max_sim_to_selected
-
-            mmr_score = (lambda_mult * sim_to_query) - (
-                (1.0 - lambda_mult) * diversity_penalty
+            diversity_penalty = (
+                max(cosine(c["vector"], s["vector"]) for s in selected)
+                if selected else 0.0
             )
+            return lambda_mult * sim_to_query - (1.0 - lambda_mult) * diversity_penalty
 
-            if mmr_score > best_score:
-                best_score = mmr_score
-                best = c
-
+        best = max(remaining, key=mmr_score)
         selected.append(best)
         remaining.remove(best)
 
@@ -114,66 +72,53 @@ def mmr_select(question_vec, candidates, top_n=8, lambda_mult=0.7):
 
 
 def rerank(question: str, candidates: List[Dict[str, Any]], top_n: int = 6) -> List[Dict[str, Any]]:
-    """
-    Cross-encoder reranking: scores (question, chunk) pairs directly.
-    """
+    """Cross-encoder reranking: scores (question, chunk) pairs directly."""
     if not candidates:
         return []
 
-    pairs: List[Tuple[str, str]] = []
-    for c in candidates:
-        pairs.append((question, c["payload"]["text"]))
-
+    pairs = [(question, c["payload"]["text"]) for c in candidates]
     scores = reranker.predict(pairs)
 
     for c, s in zip(candidates, scores):
         c["rerank_score"] = float(s)
 
-    candidates.sort(key=lambda x: x["rerank_score"], reverse=True)
-    return candidates[:top_n]
-
-def hybrid_recall(question):
-
-    vector_results = qdrant_recall(question, limit=20)
-
-    keyword_results = keyword_index.search(question, limit=20)
-
-    combined = []
-
-    for r in vector_results:
-        combined.append(r)
-
-    for r in keyword_results:
-        combined.append({
-            "payload": r["payload"],
-            "vector": None,
-            "score": r["bm25_score"]
-        })
-
-    return combined
+    return sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_n]
 
 
-def retrieve_best(question: str, recall_k=30, mmr_k=10, final_k=6):
+def hybrid_recall(
+    question: str,
+    question_vec: List[float],
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    vector_results = qdrant_recall(question_vec, limit=limit)
+    keyword_results = keyword_index.search(question, limit=limit)
 
-    # Hybrid recall
-    candidates = hybrid_recall(question)
+    keyword_candidates = [
+        {"payload": r["payload"], "vector": None, "score": r["bm25_score"]}
+        for r in keyword_results
+    ]
+
+    return vector_results + keyword_candidates
+
+
+def retrieve_best(
+    question: str,
+    recall_k: int = 30,
+    mmr_k: int = 10,
+    final_k: int = 6,
+) -> List[Dict[str, Any]]:
+    qvec = embed(question)
+    candidates = hybrid_recall(question, qvec, limit=recall_k)
 
     if not candidates:
         return []
 
-    # Only vectors participate in MMR
     vector_candidates = [c for c in candidates if c.get("vector") is not None]
 
     if not vector_candidates:
         return rerank(question, candidates, top_n=final_k)
 
-    qvec = embed(question)
-
-    diversified = mmr_select(qvec, vector_candidates, top_n=mmr_k, lambda_mult=0.7)
-
-    # Merge keyword-only results back in before reranking
+    diversified = mmr_select(qvec, vector_candidates, top_n=mmr_k)
     merged = diversified + [c for c in candidates if c.get("vector") is None]
 
-    best = rerank(question, merged, top_n=final_k)
-
-    return best
+    return rerank(question, merged, top_n=final_k)

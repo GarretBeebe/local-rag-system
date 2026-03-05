@@ -1,10 +1,9 @@
-from qdrant_client import QdrantClient
-
-COLLECTION = "documents"
-
-client = QdrantClient(host="localhost", port=6333)
+try:
+    from .index_documents import COLLECTION, client
+except ImportError:
+    from index_documents import COLLECTION, client
 
 if client.collection_exists(COLLECTION):
     client.delete_collection(COLLECTION)
 
-print("collection removed")
+print("Collection removed.")
