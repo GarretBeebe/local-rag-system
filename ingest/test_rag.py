@@ -9,13 +9,10 @@ Run this after standing up Qdrant and pulling the embedding model.
 import sys
 import uuid
 from pathlib import Path
-
 from qdrant_client.models import PointStruct
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from settings import COLLECTION, qdrant_client
 from ingest.index_documents import embed, ensure_collection
-
 
 def store_document(text: str) -> None:
     qdrant_client.upsert(

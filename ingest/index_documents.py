@@ -15,7 +15,6 @@ import uuid
 import requests
 from pathlib import Path
 from typing import List
-
 from tqdm import tqdm
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client.models import (

@@ -16,15 +16,10 @@ import yaml
 import threading
 from queue import Queue
 from pathlib import Path
-
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
 from ingest.index_documents import index_file, delete_document
-
-
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "watcher_config.yaml"
-
 
 def load_config():
     with open(CONFIG_PATH) as f:

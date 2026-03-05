@@ -7,7 +7,6 @@ Run this to wipe the knowledge base before re-indexing from scratch:
 
 import sys
 from pathlib import Path
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from settings import COLLECTION, qdrant_client
 
