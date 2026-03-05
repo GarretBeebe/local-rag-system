@@ -24,7 +24,7 @@ env/
 ENV/
 
 # Vector database data
-vector-db/
+vector-db/qdrant/storage/
 
 # Documents (local ingested content)
 documents/
