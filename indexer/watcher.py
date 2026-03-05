@@ -1,9 +1,11 @@
-from importlib.resources import path
 import os
 import time
 import hashlib
 import yaml
+import threading
+from queue import Queue
 from pathlib import Path
+
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -12,13 +14,17 @@ from ingest.index_documents import index_file, delete_document
 
 CONFIG_PATH = Path("config/watcher_config.yaml")
 
+file_queue = Queue()
+indexed_hashes = {}
+
 
 def load_config():
-    with open(CONFIG_PATH, "r") as f:
+    with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
 
 
 def sha256_file(path):
+
     h = hashlib.sha256()
 
     with open(path, "rb") as f:
@@ -28,97 +34,102 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-class DocumentWatcher(FileSystemEventHandler):
+class WatchHandler(FileSystemEventHandler):
 
     def __init__(self, config):
+
         self.allowed_ext = set(config["allowed_extensions"])
-        self.ignore_patterns = config["ignore_patterns"]
-        self.file_hashes = {}
+        self.ignore = config["ignore_patterns"]
 
     def should_ignore(self, path):
 
-        for pattern in self.ignore_patterns:
+        for pattern in self.ignore:
             if pattern in path:
                 return True
 
         return False
 
-    def valid_extension(self, path):
+    def valid_ext(self, path):
 
         return Path(path).suffix.lower() in self.allowed_ext
 
-    def process_file(self, path):
-
-        if not os.path.exists(path):
-            return
+    def enqueue(self, path):
 
         if self.should_ignore(path):
             return
 
-        if not self.valid_extension(path):
+        if not self.valid_ext(path):
             return
 
-        try:
-
-            file_hash = sha256_file(path)
-
-            if path in self.file_hashes and self.file_hashes[path] == file_hash:
-                return
-
-            print(f"Indexing updated file: {path}")
-
-            # index_file(path)
-
-            print(f"Indexing updated file: {path}")
-
-            time.sleep(0.5)
-            
-            index_file(Path(path))
-
-            self.file_hashes[path] = file_hash
-
-        except Exception as e:
-            print(f"Error indexing {path}: {e}")
+        file_queue.put(path)
 
     def on_created(self, event):
 
-        if event.is_directory:
-            return
-
-        self.process_file(event.src_path)
+        if not event.is_directory:
+            self.enqueue(event.src_path)
 
     def on_modified(self, event):
 
-        if event.is_directory:
-            return
-
-        self.process_file(event.src_path)
+        if not event.is_directory:
+            self.enqueue(event.src_path)
 
     def on_deleted(self, event):
 
         if event.is_directory:
             return
 
-        print(f"Removing document: {event.src_path}")
-
+        print(f"Deleting vectors for {event.src_path}")
         delete_document(event.src_path)
+
+
+def worker():
+
+    while True:
+
+        path = file_queue.get()
+
+        try:
+
+            if not os.path.exists(path):
+                file_queue.task_done()
+                continue
+
+            file_hash = sha256_file(path)
+
+            if path in indexed_hashes and indexed_hashes[path] == file_hash:
+                file_queue.task_done()
+                continue
+
+            print(f"Indexing {path}")
+
+            index_file(Path(path))
+
+            indexed_hashes[path] = file_hash
+
+        except Exception as e:
+
+            print(f"Error indexing {path}: {e}")
+
+        file_queue.task_done()
 
 
 def initial_scan(paths, handler):
 
-    print("Running initial document scan")
+    print("Starting initial scan")
 
     for root in paths:
 
         root = os.path.expanduser(root)
 
+        if not os.path.exists(root):
+            print(f"Skipping missing path: {root}")
+            continue
+
         for dirpath, _, filenames in os.walk(root):
 
             for f in filenames:
 
-                full_path = os.path.join(dirpath, f)
-
-                handler.process_file(full_path)
+                handler.enqueue(os.path.join(dirpath, f))
 
 
 def main():
@@ -127,7 +138,10 @@ def main():
 
     paths = [p["path"] for p in config["watch_paths"]]
 
-    handler = DocumentWatcher(config)
+    handler = WatchHandler(config)
+
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    worker_thread.start()
 
     initial_scan(paths, handler)
 
@@ -143,7 +157,7 @@ def main():
 
         recursive = p.get("recursive", True)
 
-        print(f"Watching: {path}")
+        print(f"Watching {path}")
 
         observer.schedule(handler, path, recursive=recursive)
 
