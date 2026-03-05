@@ -1,3 +1,4 @@
+from importlib.resources import path
 import os
 import time
 import hashlib
@@ -70,6 +71,8 @@ class DocumentWatcher(FileSystemEventHandler):
 
             print(f"Indexing updated file: {path}")
 
+            time.sleep(0.5)
+            
             index_file(Path(path))
 
             self.file_hashes[path] = file_hash
@@ -133,6 +136,10 @@ def main():
     for p in config["watch_paths"]:
 
         path = os.path.expanduser(p["path"])
+
+        if not os.path.exists(path):
+            print(f"Skipping missing path: {path}")
+            continue
 
         recursive = p.get("recursive", True)
 
