@@ -10,11 +10,11 @@ Can also be run directly as a script to batch-index the documents directory:
   python ingest/index_documents.py
 """
 
-import sys
 import uuid
 import requests
 from pathlib import Path
 from typing import List
+
 from tqdm import tqdm
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client.models import (
@@ -26,13 +26,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from settings import ALLOWED_EXTENSIONS, COLLECTION, EMBED_MODEL, OLLAMA_BASE_URL, VECTOR_SIZE, qdrant_client
-
-
-# Path used by the manual batch-indexing script (main).
-# The watcher uses paths from watcher_config.yaml instead.
-DOCS_PATH = Path(__file__).parent.parent / "documents"
+from settings import ALLOWED_EXTENSIONS, COLLECTION, DOCS_PATH, EMBED_MODEL, OLLAMA_BASE_URL, VECTOR_SIZE, qdrant_client
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,

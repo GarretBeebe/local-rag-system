@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "rag-system"
+version = "0.1.0"
+dependencies = [
+    "qdrant-client",
+    "sentence-transformers",
+    "rank-bm25",
+    "langchain-text-splitters",
+    "watchdog",
+    "pyyaml",
+    "tqdm",
+    "requests",
+]
+
+[tool.setuptools]
+py-modules = ["settings"]
+packages = ["api", "ingest", "indexer"]

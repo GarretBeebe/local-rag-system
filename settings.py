@@ -1,15 +1,21 @@
 """
 Project-level settings: all shared constants and infrastructure clients.
 
-Single source of truth for Qdrant connection details, Ollama model names,
-and allowed file extensions. Used by api/, ingest/, and indexer/ modules.
+Values are hardcoded here as defaults. Override by setting environment
+variables before running, or by editing this file directly.
 
-Each sub-module adds the project root to sys.path before importing:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from settings import ...
+Path resolution lives here so no other module needs __file__ manipulation:
+    CONFIG_PATH — watcher config yaml
+    DOCS_PATH   — manual batch-indexing document directory
 """
 
+from pathlib import Path
+
 from qdrant_client import QdrantClient
+
+PROJECT_ROOT = Path(__file__).parent
+CONFIG_PATH = PROJECT_ROOT / "config" / "watcher_config.yaml"
+DOCS_PATH = PROJECT_ROOT / "documents"
 
 QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333

@@ -11,19 +11,17 @@ returns the top-ranked chunks ready to be passed to the LLM.
 """
 
 from __future__ import annotations
-import sys
+
 import math
 import requests
-from pathlib import Path
 from typing import List, Dict, Any
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from sentence_transformers import CrossEncoder
-from keyword_index import KeywordIndex
+from api.keyword_index import KeywordIndex
 from settings import COLLECTION, OLLAMA_BASE_URL, EMBED_MODEL, RERANK_MODEL, qdrant_client
 
 reranker = CrossEncoder(RERANK_MODEL, device="cpu")
 keyword_index = KeywordIndex()
-
 
 def embed(text: str) -> List[float]:
     r = requests.post(

@@ -10,12 +10,10 @@ Can be run directly as a script for interactive querying:
   python api/query_rag.py
 """
 
-import sys
 import requests
-from pathlib import Path
 from typing import List, Dict, Any
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from retrieval import retrieve_best
+
+from api.retrieval import retrieve_best
 from settings import OLLAMA_BASE_URL, GEN_MODEL
 
 

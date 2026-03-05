@@ -75,7 +75,7 @@ rag-system/
 │       ├── docker-compose.yml  # Qdrant container configuration
 │       └── storage/            # Persisted vector data (gitignored)
 ├── documents/                # Indexed knowledge sources
-├── requirements.txt          # Python dependencies
+├── pyproject.toml            # Project metadata and dependencies
 ├── install.sh                # Dependency install script
 └── README.md
 ```
@@ -108,11 +108,13 @@ The paths watched for indexing are configured in `config/watcher_config.yaml`. A
 
 ## Installation
 
-**1. Install Python dependencies:**
+**1. Install the project and all dependencies:**
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
+
+This installs all dependencies declared in `pyproject.toml` and registers the project root on `sys.path`, so all modules resolve each other cleanly without any path manipulation.
 
 **2. Start the Qdrant vector database:**
 
