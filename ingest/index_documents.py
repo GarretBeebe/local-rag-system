@@ -18,15 +18,12 @@ DOCS_PATH = Path("../documents")
 
 client = QdrantClient(host="localhost", port=6333)
 
+VECTOR_SIZE = 768
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
     chunk_overlap=100
 )
-
-COLLECTION = "documents"
-
-VECTOR_SIZE = 768
 
 def ensure_collection():
     if not client.collection_exists(COLLECTION):
@@ -130,12 +127,7 @@ def main():
     if len(files) == 0:
         return
 
-    # get vector size from first chunk
-    first_text = files[0].read_text()
-    first_chunk = splitter.split_text(first_text)[0]
-    vector = embed(first_chunk)
-
-    ensure_collection(len(vector))
+    ensure_collection()
     
     for f in files:
         print("Found:", f)    
