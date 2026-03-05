@@ -96,10 +96,26 @@ Specific models may vary depending on hardware capability.
 
 # Project Structure
 
-rag-system │ ├── api │ ├── query_rag.py │ ├── retrieval.py │ └──
-keyword_index.py │ ├── ingest │ ├── index_documents.py │ └──
-reset_collection.py │ ├── documents │ └── indexed knowledge sources │
-├── vector-db │ └── container configuration │ └── README.md
+```text
+rag-system/
+├── api/
+│   ├── query_rag.py          # RAG query pipeline and LLM generation
+│   ├── retrieval.py          # Hybrid retrieval, MMR, and reranking
+│   └── keyword_index.py      # BM25 keyword index
+├── ingest/
+│   ├── index_documents.py    # Document chunking and vector ingestion
+│   ├── reset_collection.py   # Wipe the Qdrant collection
+│   └── test_rag.py           # Basic end-to-end test
+├── indexer/
+│   ├── __init__.py
+│   └── watcher.py            # Filesystem watcher for auto-indexing
+├── config/
+│   └── watcher_config.yaml   # Watch paths, extensions, ignore patterns
+├── documents/                # Indexed knowledge sources
+├── requirements.txt          # Python dependencies
+├── install.sh                # Dependency install script
+└── README.md
+```
 
 Documents placed in the **documents directory** become part of the
 searchable knowledge base once processed by the ingestion pipeline.
@@ -110,14 +126,55 @@ searchable knowledge base once processed by the ingestion pipeline.
 
 Typical system requirements:
 
-Linux-based host\
-Container runtime (Docker or equivalent)\
-Python 3.10+\
-Local LLM runtime
+- Linux-based host
+- Container runtime (Docker or equivalent)
+- Python 3.10+
+- Local LLM runtime (e.g. [Ollama](https://ollama.com))
+- Qdrant vector database
 
-Optional:
+**Python dependencies:**
 
-CPU-based inference for reranking models
+| Package | Purpose |
+| --- | --- |
+| `qdrant-client` | Vector database client |
+| `sentence-transformers` | Cross-encoder reranking |
+| `rank-bm25` | Keyword search index |
+| `langchain-text-splitters` | Document chunking |
+| `watchdog` | Filesystem monitoring |
+| `pyyaml` | Config file parsing |
+| `tqdm` | Ingestion progress display |
+| `requests` | Ollama API communication |
+
+------------------------------------------------------------------------
+
+# Installation
+
+1. Clone the repository and navigate to the project directory.
+
+2. Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Or use the provided script:
+
+```bash
+bash install.sh
+```
+
+1. Start the Qdrant vector database (via Docker):
+
+```bash
+docker run -p 6333:6333 qdrant/qdrant
+```
+
+1. Pull the required Ollama models:
+
+```bash
+ollama pull nomic-embed-text
+ollama pull qwen2.5-coder:14b
+```
 
 The system assumes the ability to run local models and containerized
 services.
