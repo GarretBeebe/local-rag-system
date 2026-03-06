@@ -1,14 +1,14 @@
 """
 OpenAI-compatible chat completions endpoint backed by the local RAG pipeline.
 
-Implements POST /v1/chat/completions so any OpenAI-compatible client
-(Open WebUI, Chatbox, etc.) can point at this server and query the
-local knowledge base.
+Implements POST /v1/chat/completions so OpenAI-compatible clients
+(Chatbox, Open WebUI, LangChain, etc.) can query the local knowledge base.
 
-The server always uses the model configured in settings.GEN_MODEL regardless
-of the model name sent by the client.
+The server always uses settings.GEN_MODEL regardless of the model name
+sent by the client.
 
 Run with:
+
     uvicorn web.api_server:app --host 0.0.0.0 --port 8000
 """
 
@@ -25,7 +25,7 @@ from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(title="Local RAG API")
 
 
 class ChatMessage(BaseModel):
@@ -62,22 +62,23 @@ async def chat(req: ChatRequest):
             GEN_MODEL,
         )
 
-    question = req.messages[-1].content
+    last_message = req.messages[-1].content
 
-    if not question.strip():
+    if not last_message.strip():
         raise HTTPException(status_code=400, detail="Last message content is empty")
 
     try:
-        answer = await asyncio.to_thread(ask, question)
+        answer = await asyncio.to_thread(ask, last_message)
     except Exception as e:
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    return {
+    response = {
         "id": f"rag-{uuid.uuid4()}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": GEN_MODEL,
+        "system_fingerprint": "local-rag",
         "choices": [
             {
                 "index": 0,
@@ -94,3 +95,5 @@ async def chat(req: ChatRequest):
             "total_tokens": 0,
         },
     }
+
+    return response
