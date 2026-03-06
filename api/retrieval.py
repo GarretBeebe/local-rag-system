@@ -10,8 +10,6 @@ Entry point for callers is retrieve_best(), which runs all three stages and
 returns the top-ranked chunks ready to be passed to the LLM.
 """
 
-from __future__ import annotations
-
 import math
 from typing import Any
 

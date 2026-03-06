@@ -89,15 +89,4 @@ Sources:
 
 if __name__ == "__main__":
     q = input("Ask a question: ").strip()
-    chunks = retrieve_best(q, recall_k=30, mmr_k=10, final_k=6)
-    if not chunks:
-        print("No relevant context found in the vector store yet.")
-    else:
-        prompt = build_prompt(q, chunks)
-        print("\nAnswer:\n")
-        print(generate(prompt).strip())
-        print("\nSources:\n")
-        for i, c in enumerate(chunks, start=1):
-            p = c["payload"]
-            path = p.get("filepath", p.get("filename", "unknown"))
-            print(f"[S{i}] {path}  (rerank={c.get('rerank_score', 0):.4f})")
+    print(ask(q))

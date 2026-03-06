@@ -11,8 +11,9 @@ Can also be run directly as a script to batch-index the documents directory:
 """
 
 import uuid
-import requests
 from pathlib import Path
+
+import requests
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -22,6 +23,8 @@ from qdrant_client.models import (
     VectorParams,
 )
 from tqdm import tqdm
+
+from ingest.chunkers import chunk_document
 from settings import (
     ALLOWED_EXTENSIONS,
     COLLECTION,
@@ -31,7 +34,6 @@ from settings import (
     VECTOR_SIZE,
     qdrant_client,
 )
-from ingest.chunkers import chunk_document
 
 _collection_ready = False
 

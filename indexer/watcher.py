@@ -11,22 +11,19 @@ config/watcher_config.yaml. Run from the project root:
 """
 
 import hashlib
+import logging
 import threading
 import time
-import yaml
-import logging
 from pathlib import Path
 from queue import Queue
+
+import yaml
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+
+from indexer.fingerprint_store import delete_hash, get_hash, init_db, upsert_hash
 from ingest.index_documents import delete_document, index_file
 from settings import CONFIG_PATH
-from indexer.fingerprint_store import (
-    init_db,
-    get_hash,
-    upsert_hash,
-    delete_hash,
-)
 
 logging.basicConfig(
     level=logging.INFO,
