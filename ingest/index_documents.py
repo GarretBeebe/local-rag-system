@@ -11,10 +11,8 @@ Can also be run directly as a script to batch-index the documents directory:
 """
 
 import uuid
-from pathlib import Path
-
 import requests
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pathlib import Path
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -24,7 +22,6 @@ from qdrant_client.models import (
     VectorParams,
 )
 from tqdm import tqdm
-
 from settings import (
     ALLOWED_EXTENSIONS,
     COLLECTION,
@@ -34,20 +31,22 @@ from settings import (
     VECTOR_SIZE,
     qdrant_client,
 )
+from ingest.chunkers import chunk_document
 
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=100,
-)
+_collection_ready = False
 
 
 def ensure_collection() -> None:
+    global _collection_ready
+    if _collection_ready:
+        return
     if not qdrant_client.collection_exists(COLLECTION):
         print("Collection missing — creating new collection")
         qdrant_client.create_collection(
             collection_name=COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
+    _collection_ready = True
 
 
 def embed(text: str) -> list[float]:
@@ -68,7 +67,7 @@ def index_file(path: Path) -> None:
     ensure_collection()
 
     text = path.read_text()
-    chunks = splitter.split_text(text)
+    chunks = chunk_document(path, text)
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path)))
 
     points = [
@@ -106,8 +105,6 @@ def main() -> None:
 
     if not files:
         return
-
-    ensure_collection()
 
     for f in files:
         print(" ", f)
