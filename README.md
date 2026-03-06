@@ -276,9 +276,10 @@ Endpoints
 
 | Method | Path | Description |
 | --- | --- | --- |
+| `GET` | `/` | Health check |
 | `GET` | `/v1/models` | List available models |
 | `GET` | `/models` | Alias for `/v1/models` |
-| `POST` | `/v1/chat/completions` | RAG-backed chat completion |
+| `POST` | `/v1/chat/completions` | RAG-backed chat completion (supports `"stream": true`) |
 | `POST` | `/chat/completions` | Alias for `/v1/chat/completions` |
 
 Start manually
