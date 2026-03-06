@@ -107,3 +107,7 @@ async def chat(req: ChatRequest):
             "total_tokens": 0,
         },
     }
+
+@app.post("/chat/completions")
+async def chat_alias(req: ChatRequest):
+    return await chat(req)
