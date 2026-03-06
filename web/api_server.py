@@ -38,6 +38,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    logger.info("%s %s", request.method, request.url.path)
+    return await call_next(request)
+
 
 class ChatMessage(BaseModel):
     role: str
@@ -74,7 +79,7 @@ def models_alias():
 async def chat(req: ChatRequest):
 
     if req.stream:
-        logger.info("Client requested streaming but streaming is not implemented.")
+        logger.debug("Streaming requested but not implemented.")
 
     if req.model != GEN_MODEL:
         logger.warning(
@@ -102,11 +107,15 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Last message content is empty")
 
     try:
-        answer = await asyncio.to_thread(ask, question)
+        answer = await asyncio.wait_for(
+            asyncio.to_thread(ask, question),
+            timeout=120
+        )
     except Exception as e:
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+    answer = str(answer or "").strip()
     logger.info("Answer: %s", answer[:200])
 
     return {
@@ -119,7 +128,7 @@ async def chat(req: ChatRequest):
                 "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": answer,
+                    "content": answer or "No response generated.",
                 },
                 "finish_reason": "stop",
             }
