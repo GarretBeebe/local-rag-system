@@ -62,7 +62,10 @@ def ask(question: str) -> str:
     if not chunks:
         return "No relevant context found in the vector store yet."
     prompt = build_prompt(question, chunks)
-    return generate(prompt).strip()
+    answer = generate(prompt).strip()
+    if "Answer:" in answer:
+        answer = answer.split("Answer:", 1)[1].strip()
+    return answer
 
 
 if __name__ == "__main__":

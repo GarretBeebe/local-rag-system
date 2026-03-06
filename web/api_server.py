@@ -95,10 +95,11 @@ async def chat(req: ChatRequest):
 
     try:
         answer = await asyncio.to_thread(ask, question)
-        logger.info("Answer: %s", str(answer)[:200])
     except Exception as e:
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+    logger.info("Answer: %s", answer[:200])
 
     return {
         "id": f"chatcmpl-{uuid.uuid4()}",

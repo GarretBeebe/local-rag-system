@@ -267,6 +267,88 @@ Logs
 
 ------------------------------------------------------------------------
 
+# API Server
+
+`web/api_server.py` exposes an OpenAI-compatible REST API so any
+OpenAI-compatible client can query the local knowledge base.
+
+Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/v1/models` | List available models |
+| `GET` | `/models` | Alias for `/v1/models` |
+| `POST` | `/v1/chat/completions` | RAG-backed chat completion |
+| `POST` | `/chat/completions` | Alias for `/v1/chat/completions` |
+
+Start manually
+
+    uvicorn web.api_server:app --host 0.0.0.0 --port 8000
+
+------------------------------------------------------------------------
+
+# Running the API Server as a Service
+
+Create systemd service
+
+    sudo nano /etc/systemd/system/rag-api.service
+
+    [Unit]
+    Description=Local RAG API Server
+    After=network.target
+
+    [Service]
+    User=garret
+    WorkingDirectory=/home/garret/Code/rag-system
+    ExecStart=/home/garret/Code/rag-system/.venv/bin/uvicorn web.api_server:app --host 0.0.0.0 --port 8000
+    Restart=always
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+
+Enable service
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable rag-api
+    sudo systemctl start rag-api
+
+Logs
+
+    journalctl -u rag-api -f
+
+------------------------------------------------------------------------
+
+# Chat Clients
+
+Any OpenAI-compatible chat client can connect to the API server.
+Point the client at `http://<host>:8000` and select the model
+`llama3.1:8b` (or whichever model is set as `GEN_MODEL`).
+
+Recommended clients:
+
+| Client | Notes |
+| --- | --- |
+| **Open WebUI** | Full-featured web UI, runs in Docker |
+| **Chatbox** | Desktop app for macOS, Windows, Linux |
+| **LangChain** | Programmatic access via `ChatOpenAI` |
+
+Open WebUI quick start
+
+    docker run -d -p 3000:8080 \
+      -e OPENAI_API_BASE_URL=http://host.docker.internal:8000/v1 \
+      -e OPENAI_API_KEY=local \
+      ghcr.io/open-webui/open-webui:main
+
+Chatbox configuration
+
+-   API Mode: OpenAI API
+-   API Host: `http://localhost:8000`
+-   API Key: `local` (any non-empty value)
+-   Model: `llama3.1:8b`
+
+------------------------------------------------------------------------
+
 # Performance Notes
 
 Current pipeline stages:
