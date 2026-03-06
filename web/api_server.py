@@ -12,7 +12,9 @@ Run with:
     uvicorn web.api_server:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import logging
+import time
 import uuid
 
 from fastapi import FastAPI, HTTPException
@@ -36,17 +38,37 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
 
 
+@app.get("/v1/models")
+def models():
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": GEN_MODEL,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "local",
+            }
+        ],
+    }
+
+
 @app.post("/v1/chat/completions")
-def chat(req: ChatRequest):
+async def chat(req: ChatRequest):
     if req.model != GEN_MODEL:
-        logger.warning("Client requested model %r but server is using %r", req.model, GEN_MODEL)
+        logger.warning(
+            "Client requested model %r but server uses %r",
+            req.model,
+            GEN_MODEL,
+        )
 
     question = req.messages[-1].content
+
     if not question.strip():
-        raise HTTPException(status_code=400, detail="Last message content is empty.")
+        raise HTTPException(status_code=400, detail="Last message content is empty")
 
     try:
-        answer = ask(question)
+        answer = await asyncio.to_thread(ask, question)
     except Exception as e:
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -54,6 +76,7 @@ def chat(req: ChatRequest):
     return {
         "id": f"rag-{uuid.uuid4()}",
         "object": "chat.completion",
+        "created": int(time.time()),
         "model": GEN_MODEL,
         "choices": [
             {
@@ -65,4 +88,9 @@ def chat(req: ChatRequest):
                 "finish_reason": "stop",
             }
         ],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
     }
