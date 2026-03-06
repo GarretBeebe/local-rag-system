@@ -27,6 +27,8 @@ from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
 
+_SERVER_START = int(time.time())
+
 app = FastAPI(title="Local RAG API")
 
 app.add_middleware(
@@ -45,6 +47,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
+    stream: bool | None = False
 
 
 @app.get("/v1/models")
@@ -55,7 +58,7 @@ def models():
             {
                 "id": GEN_MODEL,
                 "object": "model",
-                "created": int(time.time()),
+                "created": _SERVER_START,
                 "owned_by": "local",
             }
         ],
@@ -69,6 +72,10 @@ def models_alias():
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
+
+    if req.stream:
+        logger.info("Client requested streaming but streaming is not implemented.")
+
     if req.model != GEN_MODEL:
         logger.warning(
             "Client requested model %r but server uses %r",
@@ -90,7 +97,8 @@ async def chat(req: ChatRequest):
     else:
         raise HTTPException(status_code=400, detail="Unsupported message format")
 
-    if not question.strip():
+    question = question.strip()
+    if not question:
         raise HTTPException(status_code=400, detail="Last message content is empty")
 
     try:
@@ -127,3 +135,7 @@ async def chat(req: ChatRequest):
 @app.post("/chat/completions")
 async def chat_alias(req: ChatRequest):
     return await chat(req)
+
+@app.get("/")
+def root():
+    return {"status": "rag-api running"}
