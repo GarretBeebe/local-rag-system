@@ -18,11 +18,11 @@ import time
 import uuid
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from api.query_rag import ask
 from settings import GEN_MODEL
-from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,6 @@ app = FastAPI(title="Local RAG API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -45,9 +44,6 @@ class ChatRequest(BaseModel):
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
 
-@app.get("/models")
-def models_alias():
-    return models()
 
 @app.get("/v1/models")
 def models():
@@ -62,6 +58,11 @@ def models():
             }
         ],
     }
+
+
+@app.get("/models")
+def models_alias():
+    return models()
 
 
 @app.post("/v1/chat/completions")
@@ -84,7 +85,7 @@ async def chat(req: ChatRequest):
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    response = {
+    return {
         "id": f"rag-{uuid.uuid4()}",
         "object": "chat.completion",
         "created": int(time.time()),
@@ -106,5 +107,3 @@ async def chat(req: ChatRequest):
             "total_tokens": 0,
         },
     }
-
-    return response
