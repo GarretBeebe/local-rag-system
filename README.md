@@ -1,282 +1,344 @@
 # Local AI / RAG System
 
-A **self-hosted AI knowledge system** designed to run entirely on a local machine or private network. It combines **local LLM inference, document chunking, hybrid retrieval, reranking, and vector search** to enable semantic search and AI-assisted answers over locally indexed documents.
+A **self‑hosted AI knowledge system** designed to run entirely on a
+local machine or private network.\
+It combines **local LLM inference, document chunking, hybrid retrieval,
+reranking, and vector search** to enable semantic search and AI‑assisted
+answers over locally indexed documents.
 
-This project is intended for **private environments, developer experimentation, and personal AI infrastructure** where data remains fully under the operator's control.
+This project is designed for **private AI infrastructure** where
+documents, models, and embeddings remain fully under the operator's
+control.
 
 ------------------------------------------------------------------------
 
-## Overview
+# Overview
 
 This system enables:
 
-- Running local large language models (LLMs)
-- Generating embeddings for semantic search
-- Storing vectors in a local vector database
-- Automatically chunking and indexing documents
-- Performing **hybrid retrieval (vector + keyword search)**
-- Reranking retrieved documents for higher accuracy
-- Producing answers augmented with document references
-- **Filesystem watching** for automatic background re-indexing
-
-All components operate within a **private infrastructure environment**.
+-   Running local large language models
+-   Generating embeddings for semantic search
+-   Storing vectors in a local vector database
+-   Incremental indexing via SHA-256 file fingerprinting
+-   Hybrid retrieval (vector + keyword)
+-   Cross‑encoder reranking
+-   Filesystem watching for automatic re‑indexing
 
 ------------------------------------------------------------------------
 
-## System Architecture
+# Query Pipeline
 
-```text
-User
-│
-│ query
-▼
-RAG Query Pipeline
-│
-├── Query embedding → Local embedding model
-│
-├── Hybrid retrieval
-│   ├── Vector search → Qdrant vector database
-│   └── Keyword search → BM25 index
-│
-├── Diversification (MMR)
-│
-├── Cross-encoder reranking
-│
-└── Context + question → Local LLM
-│
-▼
-Response with references
+``` mermaid
+flowchart TD
+
+User --> Query[RAG Query Pipeline]
+
+Query --> Embed[Query Embedding]
+Embed --> Hybrid
+
+Hybrid --> VectorSearch
+Hybrid --> KeywordSearch
+
+VectorSearch --> Merge
+KeywordSearch --> Merge
+
+Merge --> MMR[MMR Diversification]
+MMR --> Rerank[Cross Encoder Reranking]
+
+Rerank --> Prompt[Context + Question]
+Prompt --> LLM[Local LLM]
+
+LLM --> Response[Answer with Citations]
 ```
 
-This architecture follows modern **multi-stage RAG retrieval pipelines** used in production AI systems.
-
 ------------------------------------------------------------------------
 
-## Project Structure
+# Ingestion Pipeline
 
-```text
-rag-system/
-├── settings.py               # Shared constants and Qdrant client (project-wide)
-├── api/
-│   ├── query_rag.py          # RAG query pipeline and LLM generation
-│   ├── retrieval.py          # Hybrid retrieval, MMR, and reranking
-│   └── keyword_index.py      # BM25 keyword index
-├── ingest/
-│   ├── index_documents.py    # Document chunking and vector ingestion
-│   ├── reset_collection.py   # Wipe the Qdrant collection
-│   └── test_rag.py           # Basic end-to-end smoke test
-├── indexer/
-│   ├── __init__.py
-│   └── watcher.py            # Filesystem watcher for auto-indexing
-├── config/
-│   └── watcher_config.yaml   # Watch paths, extensions, ignore patterns
-├── vector-db/
-│   └── qdrant/
-│       ├── docker-compose.yml  # Qdrant container configuration
-│       └── storage/            # Persisted vector data (gitignored)
-├── documents/                # Indexed knowledge sources
-├── pyproject.toml            # Project metadata and dependencies
-├── install.sh                # Dependency install script
-└── README.md
+``` mermaid
+flowchart TD
+
+Filesystem --> InitScan[Initial Scan on Startup]
+Filesystem --> FSEvents[Filesystem Events watchdog]
+
+InitScan --> Filter[Extension + Ignore Filter]
+FSEvents --> Filter
+
+Filter --> Queue[Index Worker Queue]
+Queue --> HashCheck{Hash Changed?}
+
+HashCheck -- No --> Skip[Skip]
+HashCheck -- Yes --> Chunking[Document Chunking]
+Chunking --> Embed[Embedding Generation]
+Embed --> VectorStore[Qdrant Vector DB]
+VectorStore --> UpdateHash[Update Fingerprint DB]
+
+FSEvents -- Delete Event --> DeleteVectors[Delete Vectors from Qdrant]
+DeleteVectors --> DeleteHash[Delete from Fingerprint DB]
 ```
 
-The paths watched for indexing are configured in `config/watcher_config.yaml`. Any file matching the allowed extensions in a configured watch path will be processed into the knowledge base.
+The ingestion pipeline supports:
+
+-   incremental indexing
+-   automatic updates
+-   deletion tracking
+-   file fingerprinting
 
 ------------------------------------------------------------------------
 
-## Requirements
+# Project Structure
 
-- macOS or Linux host
-- Docker with Docker Compose
-- Python 3.10+
-- [Ollama](https://ollama.com) for local LLM and embedding inference
+    rag-system/
+    ├── api/
+    │   ├── query_rag.py
+    │   ├── retrieval.py
+    │   └── keyword_index.py
+    │
+    ├── ingest/
+    │   ├── chunkers.py
+    │   ├── index_documents.py
+    │   ├── reset_collection.py
+    │
+    ├── indexer/
+    │   ├── watcher.py
+    │   └── fingerprint_store.py
+    │
+    ├── config/
+    │   └── watcher_config.yaml
+    │
+    ├── vector-db/
+    │   └── qdrant/
+    │
+    ├── data/
+    │   └── fingerprints.sqlite3
+    │
+    ├── install.sh
+    ├── settings.py
+    └── README.md
 
-**Python dependencies:**
+------------------------------------------------------------------------
 
-| Package | Purpose |
+# Requirements
+
+Operating System
+
+-   Linux (recommended)
+-   macOS
+
+Software
+
+-   Docker
+-   Python 3.10+
+-   Ollama
+-   sqlite3
+
+------------------------------------------------------------------------
+
+# System Package Installation
+
+Ubuntu / Debian
+
+    sudo apt update
+    sudo apt install docker.io docker-compose sqlite3
+
+macOS
+
+    brew install sqlite
+
+sqlite3 stores **file fingerprints** used to detect file changes.
+
+------------------------------------------------------------------------
+
+# Bootstrap Installation
+
+A bootstrap installer is included.
+
+    ./install.sh
+
+------------------------------------------------------------------------
+
+# Manual Installation
+
+Install Python dependencies
+
+    pip install -e .
+
+Start Qdrant
+
+    cd vector-db/qdrant
+    docker compose up -d
+
+Pull models
+
+    ollama pull nomic-embed-text
+    ollama pull qwen2.5-coder:14b
+
+------------------------------------------------------------------------
+
+# Document Ingestion
+
+Manual indexing
+
+    python ingest/index_documents.py
+
+Reset collection
+
+    python ingest/reset_collection.py
+
+------------------------------------------------------------------------
+
+# Filesystem Watcher
+
+Configuration file
+
+    config/watcher_config.yaml
+
+Example
+
+    watch_paths:
+      - path: ~/Nextcloud
+      - path: ~/Code
+
+    allowed_extensions:
+      - .md
+      - .txt
+      - .py
+
+    ignore_patterns:
+      - .git
+      - node_modules
+
+------------------------------------------------------------------------
+
+# Running the Watcher as a Service
+
+Create systemd service
+
+    sudo nano /etc/systemd/system/rag-watcher.service
+
+    [Unit]
+    Description=Local RAG Document Watcher
+    After=network.target
+
+    [Service]
+    User=garret
+    WorkingDirectory=/home/garret/Code/rag-system
+    ExecStart=/home/garret/Code/rag-system/.venv/bin/python indexer/watcher.py
+    Restart=always
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+
+Enable service
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable rag-watcher
+    sudo systemctl start rag-watcher
+
+Logs
+
+    journalctl -u rag-watcher -f
+
+------------------------------------------------------------------------
+
+# Performance Notes
+
+Current pipeline stages:
+
+1.  Vector recall
+2.  Keyword recall
+3.  MMR diversification
+4.  Cross‑encoder reranking
+
+Typical improvements:
+
+| Technique | Improvement |
 | --- | --- |
-| `qdrant-client` | Vector database client |
-| `sentence-transformers` | Cross-encoder reranking |
-| `rank-bm25` | Keyword search index |
-| `langchain-text-splitters` | Document chunking |
-| `watchdog` | Filesystem monitoring |
-| `pyyaml` | Config file parsing |
-| `tqdm` | Ingestion progress display |
-| `requests` | Ollama API communication |
+| batch embeddings | 10–30x indexing speed |
+| repository chunking | better code retrieval |
+| caching embeddings | reduces recomputation |
+| larger embedding model | higher semantic accuracy |
 
 ------------------------------------------------------------------------
 
-## Installation
+# Developer Guide
 
-**1. Install the project and all dependencies:**
+## Adding New Chunking Strategies
 
-```bash
-pip install -e .
-```
+Chunkers live in:
 
-This installs all dependencies declared in `pyproject.toml` and registers the project root on `sys.path`, so all modules resolve each other cleanly without any path manipulation.
+    ingest/chunkers.py
 
-**2. Start the Qdrant vector database:**
+Example extension:
 
-```bash
-cd vector-db/qdrant
-docker compose up -d
-```
+    def chunk_json(text):
+        ...
 
-This starts Qdrant on ports `6333` (HTTP) and `6334` (gRPC), with vector data persisted to `vector-db/qdrant/storage/`.
+Register in dispatcher:
 
-**3. Pull the required Ollama models:**
-
-```bash
-ollama pull nomic-embed-text
-ollama pull qwen2.5-coder:14b
-```
+    if suffix == ".json":
+        return chunk_json(text)
 
 ------------------------------------------------------------------------
 
-## Document Ingestion
+## Adding a Retrieval Strategy
 
-Documents are processed through a multi-stage ingestion pipeline:
+Edit
 
-```text
-filesystem
-↓
-document loading
-↓
-text chunking (RecursiveCharacterTextSplitter)
-↓
-embedding generation (Ollama)
-↓
-vector storage (Qdrant)
-```
+    api/retrieval.py
 
-Run the ingestion pipeline manually:
+Examples:
 
-```bash
-python ingest/index_documents.py
-```
-
-To wipe and reset the collection:
-
-```bash
-python ingest/reset_collection.py
-```
-
-### Chunking
-
-Documents are split into overlapping chunks to improve retrieval quality:
-
-- `chunk_size`: ~500 tokens
-- `chunk_overlap`: ~100 tokens
-
-Each chunk is stored with metadata: document ID, filename, file path, chunk index, and total chunks. This enables traceable citations in answers.
+-   hybrid retrieval
+-   graph retrieval
+-   reranking models
 
 ------------------------------------------------------------------------
 
-## Filesystem Watcher
+## Adding New Index Sources
 
-The `indexer/watcher.py` module monitors configured directories for file changes and automatically re-indexes documents in the background.
+Modify
 
-Configure watch paths, file extensions, and ignore patterns in `config/watcher_config.yaml`.
+    config/watcher_config.yaml
 
-------------------------------------------------------------------------
+Example:
 
-## Hybrid Retrieval
-
-The system uses **hybrid search** combining semantic and keyword retrieval.
-
-### Vector Search
-
-Uses semantic embeddings stored in Qdrant to retrieve conceptually related chunks.
-
-### Keyword Search
-
-Uses a lightweight **BM25 keyword index** to retrieve documents containing exact terms, identifiers, or configuration keys.
-
-Hybrid recall improves results for code, configuration files, logs, and structured documentation.
+    watch_paths:
+      - path: ~/Research
 
 ------------------------------------------------------------------------
 
-## Retrieval Pipeline
+# Security Model
 
-```text
-user query
-↓
-query embedding
-↓
-hybrid recall
-├─ vector similarity search (Qdrant)
-└─ keyword search (BM25)
-↓
-MMR diversification
-↓
-cross-encoder reranking
-↓
-top ranked chunks → LLM prompt
-↓
-answer with citations
-```
+Local‑first architecture:
+
+-   models run locally
+-   vector database local
+-   documents never leave machine
 
 ------------------------------------------------------------------------
 
-## Example Use Cases
+# Example Use Cases
 
-- Searching internal documentation
-- Querying engineering notes or research material
-- Exploring indexed knowledge sources
-- Investigating configuration files or logs
-- Experimenting with retrieval-augmented AI workflows
-
-------------------------------------------------------------------------
-
-## Security Model
-
-This project is designed with **local-first security** in mind:
-
-- Private infrastructure deployment
-- No mandatory external services
-- Full local control of models and data
-- Telemetry disabled in the Qdrant container configuration
-
-All data and embeddings remain under local control.
+-   personal knowledge base
+-   engineering documentation search
+-   AI assisted research
+-   codebase exploration
 
 ------------------------------------------------------------------------
 
-## Future Enhancements
+# Future Enhancements
 
-### User Interfaces
+Possible improvements:
 
-- Chat interface
-- Command-line interface
-- Messaging platform integrations
-
-### Advanced Retrieval
-
-- Contextual compression
-- Query expansion
-- Repository indexing
-
-### Agent Workflows
-
-- Agent orchestration frameworks
-- Multi-step reasoning pipelines
-- Task automation
+-   web interface
+-   multi‑agent workflows
+-   repository semantic graphs
+-   distributed indexing
 
 ------------------------------------------------------------------------
 
-## Goals
-
-The objective of this project is to provide a foundation for:
-
-- Local AI experimentation
-- Retrieval-augmented generation research
-- Self-hosted AI infrastructure
-- Private knowledge systems
-
-The architecture is intentionally **modular**, allowing components such as retrieval methods, models, and indexing pipelines to evolve independently.
-
-------------------------------------------------------------------------
-
-## License
+# License
 
 MIT License
