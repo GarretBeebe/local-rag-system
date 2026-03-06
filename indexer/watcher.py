@@ -14,6 +14,7 @@ import hashlib
 import threading
 import time
 import yaml
+import logging
 from pathlib import Path
 from queue import Queue
 from watchdog.events import FileSystemEventHandler
@@ -25,6 +26,11 @@ from indexer.fingerprint_store import (
     get_hash,
     upsert_hash,
     delete_hash,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
 def load_config():
@@ -62,12 +68,12 @@ class IndexWorker:
                 prev_hash = get_hash(path)
                 if prev_hash == file_hash:
                     continue
-                print(f"Indexing {path}")
+                logging.info(f"Indexing {path}")
                 index_file(p)
                 upsert_hash(path, file_hash)
 
             except Exception as e:
-                print(f"Error indexing {path}: {e}")
+                logging.error(f"Error indexing {path}: {e}")
             finally:
                 self._queue.task_done()
 
@@ -117,7 +123,7 @@ def _iter_watch_paths(watch_paths: list):
 
 
 def initial_scan(watch_paths: list, handler: WatchHandler) -> None:
-    print("Starting initial scan")
+    logging.info("Starting initial scan")
     for entry, root in _iter_watch_paths(watch_paths):
         pattern = "**/*" if entry.get("recursive", True) else "*"
         for f in root.glob(pattern):
@@ -136,7 +142,7 @@ def main() -> None:
     observer = Observer()
     for entry, path in _iter_watch_paths(config["watch_paths"]):
         recursive = entry.get("recursive", True)
-        print(f"Watching {path}")
+        logging.info(f"Watching {path}")
         observer.schedule(handler, str(path), recursive=recursive)
 
     observer.start()

@@ -13,11 +13,15 @@ def _normalize(filepath: str) -> str:
 
 def _get_conn() -> sqlite3.Connection:
     if not hasattr(_local, "conn"):
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute("PRAGMA synchronous=NORMAL")
         _local.conn = conn
+
     return _local.conn
 
 
