@@ -13,7 +13,6 @@ config/watcher_config.yaml. Run from the project root:
 import hashlib
 import threading
 import time
-from autogen_core import event
 import yaml
 from pathlib import Path
 from queue import Queue
@@ -45,7 +44,6 @@ class IndexWorker:
 
     def __init__(self):
         self._queue = Queue()
-        self._hashes: dict = {}
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -104,18 +102,23 @@ class WatchHandler(FileSystemEventHandler):
             self.enqueue(event.src_path)
 
     def on_deleted(self, event) -> None:
-        if not event.is_directory:
+        if not event.is_directory and not self.should_ignore(event.src_path) and self.valid_ext(event.src_path):
             delete_document(event.src_path)
             delete_hash(event.src_path)
 
 
+def _iter_watch_paths(watch_paths: list):
+    for entry in watch_paths:
+        path = Path(entry["path"]).expanduser()
+        if not path.exists():
+            print(f"Skipping missing path: {path}")
+            continue
+        yield entry, path
+
+
 def initial_scan(watch_paths: list, handler: WatchHandler) -> None:
     print("Starting initial scan")
-    for entry in watch_paths:
-        root = Path(entry["path"]).expanduser()
-        if not root.exists():
-            print(f"Skipping missing path: {root}")
-            continue
+    for entry, root in _iter_watch_paths(watch_paths):
         pattern = "**/*" if entry.get("recursive", True) else "*"
         for f in root.glob(pattern):
             if f.is_file():
@@ -131,11 +134,7 @@ def main() -> None:
     initial_scan(config["watch_paths"], handler)
 
     observer = Observer()
-    for entry in config["watch_paths"]:
-        path = Path(entry["path"]).expanduser()
-        if not path.exists():
-            print(f"Skipping missing path: {path}")
-            continue
+    for entry, path in _iter_watch_paths(config["watch_paths"]):
         recursive = entry.get("recursive", True)
         print(f"Watching {path}")
         observer.schedule(handler, str(path), recursive=recursive)
