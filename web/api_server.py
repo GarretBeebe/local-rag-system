@@ -16,6 +16,7 @@ import asyncio
 import logging
 import time
 import uuid
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,7 +38,7 @@ app.add_middleware(
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Any
 
 
 class ChatRequest(BaseModel):
@@ -74,13 +75,25 @@ async def chat(req: ChatRequest):
             GEN_MODEL,
         )
 
-    last_message = req.messages[-1].content
+    content = req.messages[-1].content
 
-    if not last_message.strip():
+    if isinstance(content, str):
+        question = content
+    elif isinstance(content, list):
+        # handle OpenAI structured messages
+        question = " ".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict)
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported message format")
+
+    if not question.strip():
         raise HTTPException(status_code=400, detail="Last message content is empty")
 
     try:
-        answer = await asyncio.to_thread(ask, last_message)
+        answer = await asyncio.to_thread(ask, question)
     except Exception as e:
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e
