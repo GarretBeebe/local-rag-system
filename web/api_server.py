@@ -24,6 +24,8 @@ from pydantic import BaseModel, Field
 
 from api.query_rag import ask
 from settings import GEN_MODEL
+from fastapi.responses import StreamingResponse
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +120,7 @@ async def chat(req: ChatRequest):
     answer = str(answer or "").strip()
     logger.info("Answer: %s", answer[:200])
 
-    return {
+    response = {
         "id": f"chatcmpl-{uuid.uuid4()}",
         "object": "chat.completion",
         "created": int(time.time()),
@@ -139,6 +141,29 @@ async def chat(req: ChatRequest):
             "total_tokens": 0,
         },
     }
+
+    if req.stream:
+        async def stream():
+            chunk = {
+                "id": response["id"],
+                "object": "chat.completion.chunk",
+                "created": response["created"],
+                "model": GEN_MODEL,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": answer},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+
+            yield f"data: {json.dumps(chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
+    return response
 
 
 @app.post("/chat/completions")
