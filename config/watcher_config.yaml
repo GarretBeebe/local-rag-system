@@ -1,15 +1,24 @@
 watch_paths:
 
-  - path: "~/Code"
-    recursive: true
+  # - path: "~/Code"
+  #   recursive: true
 
-  - path: "~/Machine Learning"
+  - path: "~/Nextcloud/AI-ML"
     recursive: true
 
   - path: "~/Nextcloud/My Computer Setup"
     recursive: true
 
+  - path: "~/Nextcloud/Resumes"
+    recursive: true
+
+  - path: "~/Nextcloud/Scripts"
+    recursive: true
+
   - path: "~/Nextcloud/Software Engineering"
+    recursive: true
+
+  - path: "~/Nextcloud/Splunk"
     recursive: true
 
 
