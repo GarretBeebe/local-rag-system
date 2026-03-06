@@ -57,25 +57,25 @@ def generate(prompt: str) -> str:
     return r.json()["response"]
 
 
-def ask(question: str) -> None:
+def ask(question: str) -> str:
     chunks = retrieve_best(question, recall_k=30, mmr_k=10, final_k=6)
     if not chunks:
-        print("No relevant context found in the vector store yet.")
-        return
-
+        return "No relevant context found in the vector store yet."
     prompt = build_prompt(question, chunks)
-    answer = generate(prompt)
-
-    print("\nAnswer:\n")
-    print(answer.strip())
-
-    print("\nSources:\n")
-    for i, c in enumerate(chunks, start=1):
-        p = c["payload"]
-        path = p.get("filepath", p.get("filename", "unknown"))
-        print(f"[S{i}] {path}  (rerank={c.get('rerank_score', 0):.4f})")
+    return generate(prompt).strip()
 
 
 if __name__ == "__main__":
     q = input("Ask a question: ").strip()
-    ask(q)
+    chunks = retrieve_best(q, recall_k=30, mmr_k=10, final_k=6)
+    if not chunks:
+        print("No relevant context found in the vector store yet.")
+    else:
+        prompt = build_prompt(q, chunks)
+        print("\nAnswer:\n")
+        print(generate(prompt).strip())
+        print("\nSources:\n")
+        for i, c in enumerate(chunks, start=1):
+            p = c["payload"]
+            path = p.get("filepath", p.get("filename", "unknown"))
+            print(f"[S{i}] {path}  (rerank={c.get('rerank_score', 0):.4f})")

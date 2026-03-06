@@ -14,11 +14,13 @@ dependencies = [
     "pyyaml",
     "tqdm",
     "requests",
+    "fastapi",
+    "uvicorn",
 ]
 
 [tool.setuptools]
 py-modules = ["settings"]
-packages = ["api", "ingest", "indexer"]
+packages = ["api", "ingest", "indexer", "web"]
 
 [tool.ruff]
 line-length = 100

@@ -112,6 +112,9 @@ The ingestion pipeline supports:
     ├── data/
     │   └── fingerprints.sqlite3
     │
+    ├── web/
+    │   └── api_server.py
+    │
     ├── install.sh
     ├── settings.py
     └── README.md
@@ -171,7 +174,29 @@ Start Qdrant
 Pull models
 
     ollama pull nomic-embed-text
+    ollama pull llama3.1:8b
+    ollama pull qwen2.5:14b
     ollama pull qwen2.5-coder:14b
+
+------------------------------------------------------------------------
+
+# Models
+
+Three Ollama models are configured in `settings.py`:
+
+| Variable | Model | Purpose |
+| --- | --- | --- |
+| `GEN_MODEL` | `llama3.1:8b` | General chat and Q&A |
+| `REASON_MODEL` | `qwen2.5:14b` | Reasoning and analysis |
+| `CODE_MODEL` | `qwen2.5-coder:14b` | Code-related queries |
+
+The RAG pipeline and API server use `GEN_MODEL` by default. To switch
+to a different model, update the import in `api/query_rag.py`:
+
+```python
+from settings import CODE_MODEL as GEN_MODEL   # for code queries
+from settings import REASON_MODEL as GEN_MODEL  # for reasoning tasks
+```
 
 ------------------------------------------------------------------------
 

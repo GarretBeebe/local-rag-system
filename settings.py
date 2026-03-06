@@ -24,7 +24,9 @@ VECTOR_SIZE = 768
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 EMBED_MODEL = "nomic-embed-text"
-GEN_MODEL = "qwen2.5-coder:14b"
+GEN_MODEL = "llama3.1:8b"
+REASON_MODEL = "qwen2.5:14b"
+CODE_MODEL = "qwen2.5-coder:14b"
 RERANK_MODEL = "BAAI/bge-reranker-base"
 
 ALLOWED_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml"}
