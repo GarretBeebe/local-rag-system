@@ -13,16 +13,20 @@ config/watcher_config.yaml. Run from the project root:
 import hashlib
 import threading
 import time
+from autogen_core import event
+import yaml
 from pathlib import Path
 from queue import Queue
-
-import yaml
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
-
 from ingest.index_documents import delete_document, index_file
 from settings import CONFIG_PATH
-
+from indexer.fingerprint_store import (
+    init_db,
+    get_hash,
+    upsert_hash,
+    delete_hash,
+)
 
 def load_config():
     with open(CONFIG_PATH) as f:
@@ -57,12 +61,12 @@ class IndexWorker:
                     continue
 
                 file_hash = sha256_file(p)
-                if self._hashes.get(path) == file_hash:
+                prev_hash = get_hash(path)
+                if prev_hash == file_hash:
                     continue
-
                 print(f"Indexing {path}")
                 index_file(p)
-                self._hashes[path] = file_hash
+                upsert_hash(path, file_hash)
 
             except Exception as e:
                 print(f"Error indexing {path}: {e}")
@@ -78,7 +82,11 @@ class WatchHandler(FileSystemEventHandler):
         self.worker = worker
 
     def should_ignore(self, path: str) -> bool:
-        return any(pattern in path for pattern in self.ignore)
+        p = Path(path)
+        for pattern in self.ignore:
+            if pattern in p.parts:
+                return True
+        return False
 
     def valid_ext(self, path: str) -> bool:
         return Path(path).suffix.lower() in self.allowed_ext
@@ -98,6 +106,7 @@ class WatchHandler(FileSystemEventHandler):
     def on_deleted(self, event) -> None:
         if not event.is_directory:
             delete_document(event.src_path)
+            delete_hash(event.src_path)
 
 
 def initial_scan(watch_paths: list, handler: WatchHandler) -> None:
@@ -114,6 +123,7 @@ def initial_scan(watch_paths: list, handler: WatchHandler) -> None:
 
 
 def main() -> None:
+    init_db()
     config = load_config()
     worker = IndexWorker()
     handler = WatchHandler(config, worker)
