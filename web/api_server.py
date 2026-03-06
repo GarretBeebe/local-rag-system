@@ -36,6 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class ChatMessage(BaseModel):
     role: str
     content: Any
@@ -94,16 +95,16 @@ async def chat(req: ChatRequest):
 
     try:
         answer = await asyncio.to_thread(ask, question)
+        logger.info("Answer: %s", str(answer)[:200])
     except Exception as e:
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     return {
-        "id": f"rag-{uuid.uuid4()}",
+        "id": f"chatcmpl-{uuid.uuid4()}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": GEN_MODEL,
-        "system_fingerprint": "local-rag",
         "choices": [
             {
                 "index": 0,
@@ -120,6 +121,7 @@ async def chat(req: ChatRequest):
             "total_tokens": 0,
         },
     }
+
 
 @app.post("/chat/completions")
 async def chat_alias(req: ChatRequest):
