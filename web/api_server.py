@@ -13,6 +13,7 @@ Run with:
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -20,12 +21,11 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.query_rag import ask
 from settings import GEN_MODEL
-from fastapi.responses import StreamingResponse
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +79,6 @@ def models_alias():
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
-
-    if req.stream:
-        logger.debug("Streaming requested but not implemented.")
 
     if req.model != GEN_MODEL:
         logger.warning(
@@ -144,21 +141,25 @@ async def chat(req: ChatRequest):
 
     if req.stream:
         async def stream():
-            chunk = {
+            for w in answer.split(" "):
+                chunk = {
+                    "id": response["id"],
+                    "object": "chat.completion.chunk",
+                    "created": response["created"],
+                    "model": GEN_MODEL,
+                    "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+                await asyncio.sleep(0)
+
+            done_chunk = {
                 "id": response["id"],
                 "object": "chat.completion.chunk",
                 "created": response["created"],
                 "model": GEN_MODEL,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": answer},
-                        "finish_reason": None,
-                    }
-                ],
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             }
-
-            yield f"data: {json.dumps(chunk)}\n\n"
+            yield f"data: {json.dumps(done_chunk)}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(stream(), media_type="text/event-stream")
