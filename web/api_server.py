@@ -22,11 +22,19 @@ from pydantic import BaseModel, Field
 
 from api.query_rag import ask
 from settings import GEN_MODEL
+from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Local RAG API")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class ChatMessage(BaseModel):
     role: str
@@ -37,6 +45,9 @@ class ChatRequest(BaseModel):
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
 
+@app.get("/models")
+def models_alias():
+    return models()
 
 @app.get("/v1/models")
 def models():
