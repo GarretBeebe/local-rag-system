@@ -59,13 +59,32 @@ def generate(prompt: str) -> str:
 
 def ask(question: str) -> str:
     chunks = retrieve_best(question, recall_k=30, mmr_k=10, final_k=6)
+
     if not chunks:
         return "No relevant context found in the vector store yet."
+
     prompt = build_prompt(question, chunks)
     answer = generate(prompt).strip()
+
     if "Answer:" in answer:
         answer = answer.split("Answer:", 1)[1].strip()
-    return answer
+
+    # build sources section
+    sources = []
+    for i, c in enumerate(chunks, start=1):
+        p = c["payload"]
+        path = p.get("filepath", p.get("filename", "unknown"))
+        score = c.get("rerank_score", 0)
+        sources.append(f"[S{i}] {path} (rerank={score:.4f})")
+
+    return f"""{answer}
+
+---
+
+Sources:
+
+{chr(10).join(sources)}
+"""
 
 
 if __name__ == "__main__":
