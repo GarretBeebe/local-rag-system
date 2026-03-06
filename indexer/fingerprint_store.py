@@ -7,9 +7,17 @@ DB_PATH = Path(__file__).parent.parent / "data" / "fingerprints.sqlite3"
 _local = threading.local()
 
 
+def _normalize(filepath: str) -> str:
+    return str(Path(filepath).resolve())
+
+
 def _get_conn() -> sqlite3.Connection:
     if not hasattr(_local, "conn"):
-        _local.conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        _local.conn = conn
     return _local.conn
 
 
@@ -31,7 +39,7 @@ def get_hash(filepath: str) -> str | None:
     with conn:
         row = conn.execute(
             "SELECT sha256 FROM fingerprints WHERE filepath=?",
-            (filepath,),
+            (_normalize(filepath),),
         ).fetchone()
     return row[0] if row else None
 
@@ -46,7 +54,7 @@ def upsert_hash(filepath: str, sha256: str) -> None:
             ON CONFLICT(filepath)
             DO UPDATE SET sha256=excluded.sha256, updated_at=strftime('%s','now')
             """,
-            (filepath, sha256),
+            (_normalize(filepath), sha256),
         )
 
 
@@ -55,5 +63,5 @@ def delete_hash(filepath: str) -> None:
     with conn:
         conn.execute(
             "DELETE FROM fingerprints WHERE filepath=?",
-            (filepath,),
+            (_normalize(filepath),),
         )
