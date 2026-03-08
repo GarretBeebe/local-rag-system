@@ -17,21 +17,29 @@ import json
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.query_rag import ask
-from settings import GEN_MODEL
+from settings import GEN_MODEL, OLLAMA_BASE_URL
 
 logger = logging.getLogger(__name__)
 
 _SERVER_START = int(time.time())
 
-app = FastAPI(title="Local RAG API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _warm_models()
+    yield
+
+
+app = FastAPI(title="Local RAG API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -174,3 +182,17 @@ async def chat_alias(req: ChatRequest):
 @app.get("/")
 def root():
     return {"status": "rag-api running"}
+
+
+async def _warm_models():
+    logger.info("Warming Ollama model...")
+    try:
+        await asyncio.to_thread(
+            requests.post,
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
+            timeout=60,
+        )
+        logger.info("Model warmup complete.")
+    except Exception as e:
+        logger.warning("Warmup failed: %s", e)
