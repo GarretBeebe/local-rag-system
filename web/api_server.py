@@ -27,6 +27,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.query_rag import ask
+from api.retrieval import embed_query, rerank
 from settings import GEN_MODEL, OLLAMA_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ _SERVER_START = int(time.time())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await _warm_models()
+    asyncio.create_task(_warm_models())
     yield
 
 
@@ -185,14 +186,34 @@ def root():
 
 
 async def _warm_models():
-    logger.info("Warming Ollama model...")
-    try:
-        await asyncio.to_thread(
-            requests.post,
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
-            timeout=60,
-        )
-        logger.info("Model warmup complete.")
-    except Exception as e:
-        logger.warning("Warmup failed: %s", e)
+    logger.info("Warming RAG models...")
+
+    async def warm_llm():
+        try:
+            await asyncio.to_thread(
+                requests.post,
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
+                timeout=60,
+            )
+            logger.info("LLM warmed")
+        except Exception as e:
+            logger.warning("LLM warmup failed: %s", e)
+
+    async def warm_embed():
+        try:
+            await asyncio.to_thread(embed_query, "warmup")
+            logger.info("Embedding model warmed")
+        except Exception as e:
+            logger.warning("Embedding warmup failed: %s", e)
+
+    async def warm_reranker():
+        try:
+            await asyncio.to_thread(rerank, "warmup", ["warmup text"])
+            logger.info("Reranker warmed")
+        except Exception as e:
+            logger.warning("Reranker warmup failed: %s", e)
+
+    await asyncio.gather(warm_llm(), warm_embed(), warm_reranker())
+
+    logger.info("All models warmed")
