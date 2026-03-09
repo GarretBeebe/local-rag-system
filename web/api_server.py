@@ -113,6 +113,7 @@ async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
     """
     loop = asyncio.get_running_loop()
     await _RAG_CONCURRENCY.acquire()
+    future = None
     try:
         future = loop.run_in_executor(_RAG_EXECUTOR, ask, question)
         future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
@@ -129,13 +130,10 @@ async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
             logger.exception("RAG pipeline error")
             raise HTTPException(status_code=500, detail="RAG pipeline error") from e
     except BaseException:
-        # If something goes wrong before the callback is attached or the
-        # future starts, make sure we don't leak the semaphore permit.
-        try:
+        # Only release here if we failed before creating the future/callback,
+        # otherwise the done-callback owns releasing the permit.
+        if future is None:
             _RAG_CONCURRENCY.release()
-        except ValueError:
-            # Already released by callback or not acquired.
-            pass
         raise
 
     return str(answer or "").strip()
