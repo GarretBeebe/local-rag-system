@@ -17,12 +17,19 @@ import requests
 from sentence_transformers import CrossEncoder
 
 from api.keyword_index import KeywordIndex
-from settings import COLLECTION, EMBED_MODEL, OLLAMA_BASE_URL, RERANK_MODEL, qdrant_client
+from settings import COLLECTION, EMBED_MODEL, MAX_EMBED_CHARS, OLLAMA_BASE_URL, RERANK_MODEL, qdrant_client
 
 reranker = CrossEncoder(RERANK_MODEL, device="cpu")
 keyword_index = KeywordIndex()
 
 def embed(text: str) -> list[float]:
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Cannot embed empty text")
+
+    if len(text) > MAX_EMBED_CHARS:
+        text = text[:MAX_EMBED_CHARS]
+
     r = requests.post(
         f"{OLLAMA_BASE_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},

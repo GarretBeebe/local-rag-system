@@ -20,6 +20,9 @@ watch_paths:
 
   - path: "~/Nextcloud/Splunk"
     recursive: true
+  
+  - path: "~/Code"
+    recursive: true
 
 
 allowed_extensions:
@@ -98,3 +101,15 @@ ignore_patterns:
   - ".tar"
   - ".gz"
   - ".mp4"
+
+# Translation and localization files
+  - "translations"
+  - "i18n"
+  - "locales"
+  - ".git"
+  - "node_modules"
+  - "__pycache__"
+  - ".venv"
+  - "dist"
+  - "build"
+  - "vendor"

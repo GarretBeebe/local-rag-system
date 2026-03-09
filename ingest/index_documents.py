@@ -10,6 +10,8 @@ Can also be run directly as a script to batch-index the documents directory:
   python ingest/index_documents.py
 """
 
+import functools
+import logging
 import uuid
 from pathlib import Path
 
@@ -30,28 +32,34 @@ from settings import (
     COLLECTION,
     DOCS_PATH,
     EMBED_MODEL,
+    MAX_EMBED_CHARS,
+    MAX_FILE_SIZE,
     OLLAMA_BASE_URL,
     VECTOR_SIZE,
     qdrant_client,
 )
 
-_collection_ready = False
+logger = logging.getLogger(__name__)
 
 
+@functools.cache
 def ensure_collection() -> None:
-    global _collection_ready
-    if _collection_ready:
-        return
     if not qdrant_client.collection_exists(COLLECTION):
-        print("Collection missing — creating new collection")
+        logger.info("Collection missing — creating new collection")
         qdrant_client.create_collection(
             collection_name=COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
-    _collection_ready = True
 
 
 def embed(text: str) -> list[float]:
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Cannot embed empty text")
+
+    if len(text) > MAX_EMBED_CHARS:
+        text = text[:MAX_EMBED_CHARS]
+
     r = requests.post(
         f"{OLLAMA_BASE_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text},
@@ -68,35 +76,66 @@ def load_files() -> list[Path]:
 def index_file(path: Path) -> None:
     ensure_collection()
 
-    text = path.read_text()
-    chunks = chunk_document(path, text)
-    document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path)))
+    if path.stat().st_size > MAX_FILE_SIZE:
+        logger.info("Skipping large file: %s", path)
+        return
 
-    points = [
-        PointStruct(
-            id=str(uuid.uuid4()),
-            vector=embed(chunk),
-            payload={
-                "text": chunk,
-                "document_id": document_id,
-                "filename": path.name,
-                "filepath": str(path),
-                "chunk_index": i,
-                "chunk_total": len(chunks),
-            },
+    try:
+        text = path.read_text(errors="ignore")
+    except Exception as e:
+        logger.warning("Skipping unreadable file %s: %s", path, e)
+        return
+
+    chunks = chunk_document(path, text)
+    chunks = [c.strip() for c in chunks if c and c.strip()]
+
+    if not chunks:
+        logger.info("No non-empty chunks for %s", path)
+        return
+
+    document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
+    points = []
+
+    for i, chunk in enumerate(chunks):
+        try:
+            vec = embed(chunk)
+        except Exception as e:
+            logger.warning(
+                "Skipping chunk %s for %s due to embedding failure: %s",
+                i,
+                path,
+                e,
+            )
+            continue
+
+        points.append(
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=vec,
+                payload={
+                    "text": chunk,
+                    "document_id": document_id,
+                    "filename": path.name,
+                    "filepath": str(path.resolve()),
+                    "chunk_index": i,
+                    "chunk_total": len(chunks),
+                },
+            )
         )
-        for i, chunk in enumerate(chunks)
-    ]
+
+    if not points:
+        logger.warning("No valid chunks to index for %s", path)
+        return
 
     qdrant_client.upsert(collection_name=COLLECTION, points=points)
 
 
-def delete_document(filepath: str) -> None:
-    print(f"Deleting vectors for: {filepath}")
+def delete_document(filepath: Path | str) -> None:
+    logger.info("Deleting vectors for: %s", filepath)
     qdrant_client.delete(
         collection_name=COLLECTION,
         points_selector=Filter(
-            must=[FieldCondition(key="filepath", match=MatchValue(value=filepath))]
+            must=[FieldCondition(key="filepath", match=MatchValue(value=str(filepath)))]
         ),
     )
 
@@ -107,9 +146,6 @@ def main() -> None:
 
     if not files:
         return
-
-    for f in files:
-        print(" ", f)
 
     for f in tqdm(files):
         index_file(f)

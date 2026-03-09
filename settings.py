@@ -31,4 +31,9 @@ RERANK_MODEL = "BAAI/bge-reranker-base"
 
 ALLOWED_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml"}
 
+MAX_FILE_SIZE = 1_000_000
+MAX_EMBED_CHARS = 6000
+MAX_CHUNK_CHARS = 2000
+MAX_MD_CHUNK = 2000
+
 qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
