@@ -54,7 +54,13 @@ def mmr_select(
     top_n: int = 8,
     lambda_mult: float = 0.7,
 ) -> list[dict[str, Any]]:
+    """Select a diverse subset of candidates using Maximal Marginal Relevance.
+
+    Only candidates that include a dense vector are considered; keyword-only
+    results without vectors should be filtered out by the caller.
+    """
     def mmr_score(c, selected):
+        """Score a candidate by balancing relevance to the query and diversity."""
         sim_to_query = cosine(question_vec, c["vector"])
         diversity_penalty = (
             max(cosine(c["vector"], s["vector"]) for s in selected)
@@ -92,6 +98,7 @@ def hybrid_recall(
     question_vec: list[float],
     limit: int = 20,
 ) -> list[dict[str, Any]]:
+    """Combine dense vector recall from Qdrant with BM25 keyword search results."""
     vector_results = qdrant_recall(question_vec, limit=limit)
     keyword_results = keyword_index.search(question, limit=limit)
 
@@ -109,6 +116,7 @@ def retrieve_best(
     mmr_k: int = 10,
     final_k: int = 6,
 ) -> list[dict[str, Any]]:
+    """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
     qvec = embed(question)
     candidates = hybrid_recall(question, qvec, limit=recall_k)
 
