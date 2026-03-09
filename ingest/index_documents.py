@@ -49,7 +49,6 @@ def ensure_collection() -> None:
         )
 
 
-
 def load_files() -> list[Path]:
     return [p for p in DOCS_PATH.rglob("*") if p.is_file() and p.suffix in ALLOWED_EXTENSIONS]
 

@@ -30,6 +30,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
+
 def load_config():
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
@@ -65,12 +66,12 @@ class IndexWorker:
                 prev_hash = get_hash(path)
                 if prev_hash == file_hash:
                     continue
-                logging.info(f"Indexing {path}")
+                logging.info("Indexing %s", path)
                 index_file(p)
                 upsert_hash(path, file_hash)
 
             except Exception as e:
-                logging.error(f"Error indexing {path}: {e}")
+                logging.error("Error indexing %s: %s", path, e)
             finally:
                 self._queue.task_done()
 
@@ -114,7 +115,7 @@ def _iter_watch_paths(watch_paths: list):
     for entry in watch_paths:
         path = Path(entry["path"]).expanduser()
         if not path.exists():
-            print(f"Skipping missing path: {path}")
+            logging.warning("Skipping missing path: %s", path)
             continue
         yield entry, path
 
@@ -139,7 +140,7 @@ def main() -> None:
     observer = Observer()
     for entry, path in _iter_watch_paths(config["watch_paths"]):
         recursive = entry.get("recursive", True)
-        logging.info(f"Watching {path}")
+        logging.info("Watching %s", path)
         observer.schedule(handler, str(path), recursive=recursive)
 
     observer.start()

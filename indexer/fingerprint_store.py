@@ -1,3 +1,10 @@
+"""
+Per-file SHA-256 fingerprint store backed by SQLite.
+
+Tracks which files have been indexed and their content hashes so the watcher
+can skip files that haven't changed since last indexing.
+"""
+
 import sqlite3
 import threading
 from pathlib import Path

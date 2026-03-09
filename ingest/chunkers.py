@@ -36,9 +36,6 @@ def chunk_text(text: str) -> list[str]:
 # Python code chunking
 # -------------------------
 
-# Segments larger than this are sub-split using chunk_text (see chunk_size above).
-
-
 def chunk_python(text: str) -> list[str]:
     try:
         tree = ast.parse(text)

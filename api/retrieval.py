@@ -24,7 +24,8 @@ keyword_index = KeywordIndex()
 
 
 def cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    """Returns the cosine similarity between two vectors, or 0.0 if either is zero-length."""
+    dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0.0 or nb == 0.0:
@@ -53,19 +54,19 @@ def mmr_select(
     top_n: int = 8,
     lambda_mult: float = 0.7,
 ) -> list[dict[str, Any]]:
+    def mmr_score(c, selected):
+        sim_to_query = cosine(question_vec, c["vector"])
+        diversity_penalty = (
+            max(cosine(c["vector"], s["vector"]) for s in selected)
+            if selected else 0.0
+        )
+        return lambda_mult * sim_to_query - (1.0 - lambda_mult) * diversity_penalty
+
     selected = []
     remaining = candidates[:]
 
     while remaining and len(selected) < top_n:
-        def mmr_score(c):
-            sim_to_query = cosine(question_vec, c["vector"])
-            diversity_penalty = (
-                max(cosine(c["vector"], s["vector"]) for s in selected)
-                if selected else 0.0
-            )
-            return lambda_mult * sim_to_query - (1.0 - lambda_mult) * diversity_penalty
-
-        best = max(remaining, key=mmr_score)
+        best = max(remaining, key=lambda c: mmr_score(c, selected))
         selected.append(best)
         remaining.remove(best)
 
@@ -80,7 +81,7 @@ def rerank(question: str, candidates: list[dict[str, Any]], top_n: int = 6) -> l
     pairs = [(question, c["payload"]["text"]) for c in candidates]
     scores = reranker.predict(pairs)
 
-    for c, s in zip(candidates, scores, strict=False):
+    for c, s in zip(candidates, scores):
         c["rerank_score"] = float(s)
 
     return sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_n]

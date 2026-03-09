@@ -50,6 +50,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.middleware("http")
 async def log_requests(request, call_next):
     logger.info("%s %s", request.method, request.url.path)
@@ -89,7 +90,6 @@ def models_alias():
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
-
     if req.model != GEN_MODEL:
         logger.warning(
             "Client requested model %r but server uses %r",
@@ -181,6 +181,7 @@ async def chat(req: ChatRequest):
 async def chat_alias(req: ChatRequest):
     return await chat(req)
 
+
 @app.get("/")
 def root():
     return {"status": "rag-api running"}
@@ -210,7 +211,7 @@ async def _warm_models():
 
     async def warm_reranker():
         try:
-            await asyncio.to_thread(rerank, "warmup", ["warmup text"])
+            await asyncio.to_thread(rerank, "warmup", [{"payload": {"text": "warmup"}}])
             logger.info("Reranker warmed")
         except Exception as e:
             logger.warning("Reranker warmup failed: %s", e)
