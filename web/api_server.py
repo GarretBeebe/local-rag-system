@@ -207,12 +207,18 @@ async def chat(req: ChatRequest):
 
     question = _extract_question_from_messages(req.messages)
     answer = await _run_rag_with_timeout(question)
-    logger.info("Answer: %s", answer[:200])
 
-    response = _build_chat_response(answer)
+    # Normalize the answer once so both JSON and SSE streaming use the same value.
+    normalized_answer = answer if (answer and answer.strip()) else "No response generated."
+    logger.info("Answer: %s", normalized_answer[:200])
+
+    response = _build_chat_response(normalized_answer)
 
     if req.stream:
-        return StreamingResponse(_stream_answer(answer, response), media_type="text/event-stream")
+        return StreamingResponse(
+            _stream_answer(normalized_answer, response),
+            media_type="text/event-stream",
+        )
 
     return response
 
