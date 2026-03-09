@@ -164,9 +164,9 @@ def main() -> None:
             time.sleep(5)
     except KeyboardInterrupt:
         observer.stop()
-        worker.stop()
 
     observer.join()
+    worker.stop()
 
 
 if __name__ == "__main__":
