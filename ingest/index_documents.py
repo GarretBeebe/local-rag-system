@@ -12,6 +12,7 @@ Can also be run directly as a script to batch-index the documents directory:
 
 import functools
 import logging
+import time
 import uuid
 from pathlib import Path
 
@@ -74,6 +75,7 @@ def index_file(path: Path) -> None:
         return
 
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
+    start = time.monotonic()
     points = []
 
     for i, chunk in enumerate(chunks):
@@ -108,6 +110,13 @@ def index_file(path: Path) -> None:
         return
 
     qdrant_client.upsert(collection_name=COLLECTION, points=points)
+    elapsed = time.monotonic() - start
+    logger.info(
+        "Indexed %s with %d chunks in %.2fs",
+        path,
+        len(points),
+        elapsed,
+    )
 
 
 def delete_document(filepath: Path | str) -> None:

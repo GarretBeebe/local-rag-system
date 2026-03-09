@@ -68,6 +68,93 @@ class ChatRequest(BaseModel):
     stream: bool | None = False
 
 
+def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
+    """Extract the user question from the last chat message, handling OpenAI formats."""
+    content = messages[-1].content
+
+    if isinstance(content, str):
+        question = content
+    elif isinstance(content, list):
+        # handle OpenAI structured messages
+        question = " ".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict)
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported message format")
+
+    question = question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Last message content is empty")
+    return question
+
+
+async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
+    """Execute the RAG pipeline in a worker thread with a timeout."""
+    try:
+        answer = await asyncio.wait_for(
+            asyncio.to_thread(ask, question),
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.exception("RAG pipeline error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    return str(answer or "").strip()
+
+
+def _build_chat_response(answer: str) -> dict[str, Any]:
+    """Build an OpenAI-compatible chat completion response object."""
+    answer = answer or "No response generated."
+    response = {
+        "id": f"chatcmpl-{uuid.uuid4()}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": GEN_MODEL,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": answer,
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+    }
+    return response
+
+
+async def _stream_answer(answer: str, response: dict[str, Any]):
+    """Yield answer tokens as an SSE stream compatible with OpenAI clients."""
+    for w in answer.split(" "):
+        chunk = {
+            "id": response["id"],
+            "object": "chat.completion.chunk",
+            "created": response["created"],
+            "model": GEN_MODEL,
+            "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
+        }
+        yield f"data: {json.dumps(chunk)}\n\n"
+        await asyncio.sleep(0)
+
+    done_chunk = {
+        "id": response["id"],
+        "object": "chat.completion.chunk",
+        "created": response["created"],
+        "model": GEN_MODEL,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(done_chunk)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
 @app.get("/v1/models")
 def models():
     return {
@@ -97,82 +184,14 @@ async def chat(req: ChatRequest):
             GEN_MODEL,
         )
 
-    content = req.messages[-1].content
-
-    if isinstance(content, str):
-        question = content
-    elif isinstance(content, list):
-        # handle OpenAI structured messages
-        question = " ".join(
-            item.get("text", "")
-            for item in content
-            if isinstance(item, dict)
-        )
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported message format")
-
-    question = question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Last message content is empty")
-
-    try:
-        answer = await asyncio.wait_for(
-            asyncio.to_thread(ask, question),
-            timeout=120
-        )
-    except Exception as e:
-        logger.exception("RAG pipeline error")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    answer = str(answer or "").strip()
+    question = _extract_question_from_messages(req.messages)
+    answer = await _run_rag_with_timeout(question)
     logger.info("Answer: %s", answer[:200])
 
-    response = {
-        "id": f"chatcmpl-{uuid.uuid4()}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": GEN_MODEL,
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": answer or "No response generated.",
-                },
-                "finish_reason": "stop",
-            }
-        ],
-        "usage": {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        },
-    }
+    response = _build_chat_response(answer)
 
     if req.stream:
-        async def stream():
-            for w in answer.split(" "):
-                chunk = {
-                    "id": response["id"],
-                    "object": "chat.completion.chunk",
-                    "created": response["created"],
-                    "model": GEN_MODEL,
-                    "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
-                }
-                yield f"data: {json.dumps(chunk)}\n\n"
-                await asyncio.sleep(0)
-
-            done_chunk = {
-                "id": response["id"],
-                "object": "chat.completion.chunk",
-                "created": response["created"],
-                "model": GEN_MODEL,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            }
-            yield f"data: {json.dumps(done_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        return StreamingResponse(_stream_answer(answer, response), media_type="text/event-stream")
 
     return response
 

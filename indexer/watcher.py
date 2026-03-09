@@ -47,16 +47,26 @@ def sha256_file(path: Path) -> str:
 class IndexWorker:
 
     def __init__(self):
-        self._queue = Queue()
+        self._queue: Queue[str | None] = Queue()
+        self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def submit(self, path: str) -> None:
         self._queue.put(path)
 
+    def stop(self) -> None:
+        """Signal the worker to stop after processing any queued paths."""
+        self._running = False
+        self._queue.put(None)
+        self._thread.join()
+
     def _run(self) -> None:
-        while True:
+        while self._running:
             path = self._queue.get()
+            if path is None:
+                self._queue.task_done()
+                break
             try:
                 p = Path(path)
                 if not p.exists():
@@ -93,8 +103,12 @@ class WatchHandler(FileSystemEventHandler):
     def valid_ext(self, path: str) -> bool:
         return Path(path).suffix.lower() in self.allowed_ext
 
+    def _should_enqueue_file(self, path: str) -> bool:
+        """Return True if the file at path should be processed by the indexer."""
+        return not self.should_ignore(path) and self.valid_ext(path)
+
     def enqueue(self, path: str) -> None:
-        if not self.should_ignore(path) and self.valid_ext(path):
+        if self._should_enqueue_file(path):
             self.worker.submit(path)
 
     def on_created(self, event) -> None:
@@ -106,7 +120,7 @@ class WatchHandler(FileSystemEventHandler):
             self.enqueue(event.src_path)
 
     def on_deleted(self, event) -> None:
-        if not event.is_directory and not self.should_ignore(event.src_path) and self.valid_ext(event.src_path):
+        if not event.is_directory and self._should_enqueue_file(event.src_path):
             delete_document(event.src_path)
             delete_hash(event.src_path)
 
@@ -150,6 +164,7 @@ def main() -> None:
             time.sleep(5)
     except KeyboardInterrupt:
         observer.stop()
+        worker.stop()
 
     observer.join()
 

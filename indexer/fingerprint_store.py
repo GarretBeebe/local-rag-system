@@ -15,10 +15,12 @@ _local = threading.local()
 
 
 def _normalize(filepath: str) -> str:
+    """Return a normalized absolute path for consistent storage in the database."""
     return str(Path(filepath).resolve())
 
 
 def _get_conn() -> sqlite3.Connection:
+    """Get a thread-local SQLite connection, initializing it on first use."""
     if not hasattr(_local, "conn"):
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
@@ -33,6 +35,7 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    """Initialize the fingerprints table if it does not already exist."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = _get_conn()
     with conn:
@@ -46,6 +49,7 @@ def init_db() -> None:
 
 
 def get_hash(filepath: str) -> str | None:
+    """Return the stored SHA-256 hash for filepath, or None if unknown."""
     conn = _get_conn()
     with conn:
         row = conn.execute(
@@ -56,6 +60,7 @@ def get_hash(filepath: str) -> str | None:
 
 
 def upsert_hash(filepath: str, sha256: str) -> None:
+    """Insert or update the SHA-256 hash for filepath."""
     conn = _get_conn()
     with conn:
         conn.execute(
@@ -70,6 +75,7 @@ def upsert_hash(filepath: str, sha256: str) -> None:
 
 
 def delete_hash(filepath: str) -> None:
+    """Delete any stored hash entry for filepath."""
     conn = _get_conn()
     with conn:
         conn.execute(

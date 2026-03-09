@@ -68,12 +68,12 @@ def chunk_python(text: str) -> list[str]:
 HEADER_PATTERN = re.compile(r"^#{1,6} ")
 
 
-def chunk_markdown(text: str) -> list[str]:
+def _split_markdown_sections(text: str) -> list[str]:
+    """Split a markdown document into sections at header boundaries."""
     lines = text.splitlines()
-    sections = []
-    current = []
+    sections: list[str] = []
+    current: list[str] = []
 
-    # First pass: split by markdown headers
     for line in lines:
         if HEADER_PATTERN.match(line) and current:
             sections.append("\n".join(current))
@@ -83,32 +83,41 @@ def chunk_markdown(text: str) -> list[str]:
     if current:
         sections.append("\n".join(current))
 
-    sections = [s.strip() for s in sections if s.strip()]
+    return [s.strip() for s in sections if s.strip()]
 
-    # Second pass: split oversized sections
-    final_chunks = []
+
+def _split_oversized_markdown_section(section: str) -> list[str]:
+    """Split a large markdown section into smaller chunks respecting MAX_MD_CHUNK."""
+    if len(section) <= MAX_MD_CHUNK:
+        return [section]
+
+    paragraphs = section.split("\n\n")
+    final_chunks: list[str] = []
+    buf: list[str] = []
+
+    for p in paragraphs:
+        if buf and sum(len(x) for x in buf) + len(p) > MAX_MD_CHUNK:
+            final_chunks.append("\n\n".join(buf))
+            buf = []
+
+        if len(p) > MAX_MD_CHUNK:
+            final_chunks.extend(chunk_text(p))
+        else:
+            buf.append(p)
+
+    if buf:
+        final_chunks.append("\n\n".join(buf))
+
+    return final_chunks
+
+
+def chunk_markdown(text: str) -> list[str]:
+    """Chunk markdown into sections and sub-sections that fit within MAX_MD_CHUNK."""
+    sections = _split_markdown_sections(text)
+    final_chunks: list[str] = []
 
     for section in sections:
-        if len(section) <= MAX_MD_CHUNK:
-            final_chunks.append(section)
-            continue
-
-        # fallback: split large sections into paragraphs
-        paragraphs = section.split("\n\n")
-        buf = []
-
-        for p in paragraphs:
-            if buf and sum(len(x) for x in buf) + len(p) > MAX_MD_CHUNK:
-                final_chunks.append("\n\n".join(buf))
-                buf = []
-
-            if len(p) > MAX_MD_CHUNK:
-                final_chunks.extend(chunk_text(p))
-            else:
-                buf.append(p)
-
-        if buf:
-            final_chunks.append("\n\n".join(buf))
+        final_chunks.extend(_split_oversized_markdown_section(section))
 
     return final_chunks
 
