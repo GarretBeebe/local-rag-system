@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
         warm_task.cancel()
         with suppress(asyncio.CancelledError):
             await warm_task
+        _RAG_EXECUTOR.shutdown(wait=False)
 
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
