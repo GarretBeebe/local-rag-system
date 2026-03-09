@@ -17,7 +17,8 @@ import json
 import logging
 import time
 import uuid
-from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import requests
@@ -34,11 +35,23 @@ from settings import GEN_MODEL, OLLAMA_BASE_URL
 logger = logging.getLogger(__name__)
 
 _SERVER_START = int(time.time())
+_RAG_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+_RAG_CONCURRENCY = asyncio.Semaphore(4)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(_warm_models())
-    yield
+    warm_task = asyncio.create_task(_warm_models())
+    try:
+        yield
+    finally:
+        warm_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await warm_task
+        try:
+            _RAG_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            # Python < 3.9 compatibility (no cancel_futures kwarg)
+            _RAG_EXECUTOR.shutdown(wait=False)
 
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
@@ -91,24 +104,28 @@ def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
 
 
 async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
-    """Execute the RAG pipeline in a worker thread with a timeout."""
-    try:
-        answer = await asyncio.wait_for(
-            asyncio.to_thread(ask, question),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("RAG pipeline timed out after %.1fs", timeout)
-        raise HTTPException(
-            status_code=504,
-            detail="RAG pipeline timed out while generating an answer.",
-        ) from None
-    except Exception as e:
-        logger.exception("RAG pipeline error")
-        raise HTTPException(
-            status_code=500,
-            detail="RAG pipeline error",
-        ) from e
+    """Execute the RAG pipeline with a timeout and bounded concurrency.
+
+    Note: asyncio.wait_for does not cancel the underlying thread, so we also
+    bound overall concurrency via a shared ThreadPoolExecutor and semaphore
+    to avoid unbounded resource growth under repeated timeouts.
+    """
+    loop = asyncio.get_running_loop()
+    async with _RAG_CONCURRENCY:
+        try:
+            answer = await asyncio.wait_for(
+                loop.run_in_executor(_RAG_EXECUTOR, ask, question),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("RAG pipeline timed out after %.1fs", timeout)
+            raise HTTPException(
+                status_code=504,
+                detail="RAG pipeline timed out while generating an answer.",
+            ) from None
+        except Exception as e:
+            logger.exception("RAG pipeline error")
+            raise HTTPException(status_code=500, detail="RAG pipeline error") from e
 
     return str(answer or "").strip()
 

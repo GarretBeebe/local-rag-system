@@ -48,7 +48,6 @@ class IndexWorker:
 
     def __init__(self):
         self._queue: Queue[str | None] = Queue()
-        self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -57,12 +56,13 @@ class IndexWorker:
 
     def stop(self) -> None:
         """Signal the worker to stop after processing any queued paths."""
-        self._running = False
+        # Wait for all currently queued tasks to finish, then send a sentinel.
+        self._queue.join()
         self._queue.put(None)
         self._thread.join()
 
     def _run(self) -> None:
-        while self._running:
+        while True:
             path = self._queue.get()
             if path is None:
                 self._queue.task_done()

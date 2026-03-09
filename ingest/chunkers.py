@@ -94,16 +94,21 @@ def _split_oversized_markdown_section(section: str) -> list[str]:
     paragraphs = section.split("\n\n")
     final_chunks: list[str] = []
     buf: list[str] = []
+    buf_len = 0  # length of "\n\n".join(buf)
 
     for p in paragraphs:
-        if buf and sum(len(x) for x in buf) + len(p) > MAX_MD_CHUNK:
+        # Adding a paragraph adds its length plus the separator ("\n\n") if buffer isn't empty.
+        additional = len(p) + (2 if buf else 0)
+        if buf and (buf_len + additional) > MAX_MD_CHUNK:
             final_chunks.append("\n\n".join(buf))
             buf = []
+            buf_len = 0
 
         if len(p) > MAX_MD_CHUNK:
             final_chunks.extend(chunk_text(p))
         else:
             buf.append(p)
+            buf_len += len(p) + (2 if buf_len else 0)
 
     if buf:
         final_chunks.append("\n\n".join(buf))
