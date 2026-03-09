@@ -105,7 +105,10 @@ async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
         ) from None
     except Exception as e:
         logger.exception("RAG pipeline error")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500,
+            detail="RAG pipeline error",
+        ) from e
 
     return str(answer or "").strip()
 
