@@ -26,8 +26,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.embed import embed
 from api.query_rag import ask
-from api.retrieval import embed, rerank
+from api.retrieval import rerank
 from settings import GEN_MODEL, OLLAMA_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -209,7 +210,7 @@ async def _warm_models():
 
     async def warm_reranker():
         try:
-            await asyncio.to_thread(rerank, "warmup", [{"payload": {"text": "warmup"}}])
+            await asyncio.to_thread(rerank, "warmup", ["warmup text"])
             logger.info("Reranker warmed")
         except Exception as e:
             logger.warning("Reranker warmup failed: %s", e)

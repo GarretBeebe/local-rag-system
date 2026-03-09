@@ -15,7 +15,6 @@ import logging
 import uuid
 from pathlib import Path
 
-import requests
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -26,15 +25,13 @@ from qdrant_client.models import (
 )
 from tqdm import tqdm
 
+from api.embed import embed
 from ingest.chunkers import chunk_document
 from settings import (
     ALLOWED_EXTENSIONS,
     COLLECTION,
     DOCS_PATH,
-    EMBED_MODEL,
-    MAX_EMBED_CHARS,
     MAX_FILE_SIZE,
-    OLLAMA_BASE_URL,
     VECTOR_SIZE,
     qdrant_client,
 )
@@ -51,22 +48,6 @@ def ensure_collection() -> None:
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
 
-
-def embed(text: str) -> list[float]:
-    text = (text or "").strip()
-    if not text:
-        raise ValueError("Cannot embed empty text")
-
-    if len(text) > MAX_EMBED_CHARS:
-        text = text[:MAX_EMBED_CHARS]
-
-    r = requests.post(
-        f"{OLLAMA_BASE_URL}/api/embeddings",
-        json={"model": EMBED_MODEL, "prompt": text},
-        timeout=60,
-    )
-    r.raise_for_status()
-    return r.json()["embedding"]
 
 
 def load_files() -> list[Path]:

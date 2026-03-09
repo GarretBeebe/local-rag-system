@@ -13,30 +13,14 @@ returns the top-ranked chunks ready to be passed to the LLM.
 import math
 from typing import Any
 
-import requests
 from sentence_transformers import CrossEncoder
 
+from api.embed import embed
 from api.keyword_index import KeywordIndex
-from settings import COLLECTION, EMBED_MODEL, MAX_EMBED_CHARS, OLLAMA_BASE_URL, RERANK_MODEL, qdrant_client
+from settings import COLLECTION, RERANK_MODEL, qdrant_client
 
 reranker = CrossEncoder(RERANK_MODEL, device="cpu")
 keyword_index = KeywordIndex()
-
-def embed(text: str) -> list[float]:
-    text = (text or "").strip()
-    if not text:
-        raise ValueError("Cannot embed empty text")
-
-    if len(text) > MAX_EMBED_CHARS:
-        text = text[:MAX_EMBED_CHARS]
-
-    r = requests.post(
-        f"{OLLAMA_BASE_URL}/api/embeddings",
-        json={"model": EMBED_MODEL, "prompt": text},
-        timeout=60,
-    )
-    r.raise_for_status()
-    return r.json()["embedding"]
 
 
 def cosine(a: list[float], b: list[float]) -> float:

@@ -10,7 +10,8 @@ import uuid
 
 from qdrant_client.models import PointStruct
 
-from ingest.index_documents import embed, ensure_collection
+from api.embed import embed
+from ingest.index_documents import ensure_collection
 from settings import COLLECTION, qdrant_client
 
 
