@@ -97,6 +97,12 @@ async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
             asyncio.to_thread(ask, question),
             timeout=timeout,
         )
+    except asyncio.TimeoutError:
+        logger.warning("RAG pipeline timed out after %.1fs", timeout)
+        raise HTTPException(
+            status_code=504,
+            detail="RAG pipeline timed out while generating an answer.",
+        ) from None
     except Exception as e:
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail=str(e)) from e

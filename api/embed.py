@@ -27,9 +27,11 @@ def embed(text: str) -> list[float]:
             timeout=60,
         )
         response.raise_for_status()
-        data = response.json()
     except RequestException as e:
         raise RuntimeError(f"Embedding request failed: {e}") from e
+
+    try:
+        data = response.json()
     except ValueError as e:
         # .json() failed
         raise RuntimeError(f"Embedding service returned invalid JSON: {e}") from e
