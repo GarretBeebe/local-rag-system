@@ -100,19 +100,25 @@ def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
 
 
 async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
-    """Execute the RAG pipeline with a timeout and bounded concurrency.
+    """Execute the RAG pipeline with a timeout and bounded in-flight work.
 
-    Note: asyncio.wait_for does not cancel the underlying thread, so we also
-    bound overall concurrency via a shared ThreadPoolExecutor and semaphore
-    to avoid unbounded resource growth under repeated timeouts.
+    The semaphore counts in-flight executor tasks, not just requests waiting
+    on them. We therefore:
+
+    - Acquire the semaphore before submitting to the executor.
+    - Attach a done-callback that releases the semaphore when the future
+      actually completes, regardless of who is awaiting it.
+    - On timeout, we *do not* release the semaphore early; the slot only
+      becomes available when the underlying work finishes.
     """
     loop = asyncio.get_running_loop()
-    async with _RAG_CONCURRENCY:
+    await _RAG_CONCURRENCY.acquire()
+    try:
+        future = loop.run_in_executor(_RAG_EXECUTOR, ask, question)
+        future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
+
         try:
-            answer = await asyncio.wait_for(
-                loop.run_in_executor(_RAG_EXECUTOR, ask, question),
-                timeout=timeout,
-            )
+            answer = await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
             logger.warning("RAG pipeline timed out after %.1fs", timeout)
             raise HTTPException(
@@ -122,6 +128,15 @@ async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
         except Exception as e:
             logger.exception("RAG pipeline error")
             raise HTTPException(status_code=500, detail="RAG pipeline error") from e
+    except BaseException:
+        # If something goes wrong before the callback is attached or the
+        # future starts, make sure we don't leak the semaphore permit.
+        try:
+            _RAG_CONCURRENCY.release()
+        except ValueError:
+            # Already released by callback or not acquired.
+            pass
+        raise
 
     return str(answer or "").strip()
 
