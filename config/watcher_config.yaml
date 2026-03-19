@@ -9,6 +9,9 @@ watch_paths:
   - path: "~/Nextcloud/My Computer Setup"
     recursive: true
 
+  - path: "~/Nextcloud/OpenAI Projects Context"
+    recursive: true
+
   - path: "~/Nextcloud/Resumes"
     recursive: true
 
