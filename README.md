@@ -127,6 +127,7 @@ Operating System
 
 -   Linux (recommended)
 -   macOS
+-   Windows 11
 
 Software
 
@@ -177,6 +178,76 @@ Pull models
     ollama pull llama3.1:8b
     ollama pull qwen2.5:14b
     ollama pull qwen2.5-coder:14b
+
+------------------------------------------------------------------------
+
+# Windows 11 Setup
+
+## Prerequisites
+
+| Requirement | Source | Notes |
+| --- | --- | --- |
+| Python 3.10+ | python.org | Check "Add to PATH" during install |
+| Docker Desktop | docker.com | Enable WSL2 backend when prompted |
+| Ollama | ollama.com/download | Installs as a Windows service automatically |
+
+## First-Time Setup
+
+Allow local PowerShell scripts to run (run once in an elevated terminal):
+
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+Install Python dependencies:
+
+    pip install -e .
+
+Pull Ollama models (same as Linux):
+
+    ollama pull nomic-embed-text
+    ollama pull llama3.1:8b
+    ollama pull qwen2.5:14b
+    ollama pull qwen2.5-coder:14b
+
+## Starting Services
+
+Open three separate PowerShell terminals and run one script in each:
+
+    windows\Start-Qdrant.ps1
+    windows\Start-Watcher.ps1
+    windows\Start-ApiServer.ps1
+
+Ctrl+C in any terminal stops that service.
+
+## Auto-Start on Login (Windows Service Equivalent)
+
+Run once in an elevated PowerShell window to register both services
+with Windows Task Scheduler (starts automatically at each logon):
+
+    windows\Install-Services.ps1
+
+Manage tasks:
+
+    # Stop
+    Stop-ScheduledTask -TaskName "RAG-Watcher"
+    Stop-ScheduledTask -TaskName "RAG-ApiServer"
+
+    # Start manually
+    Start-ScheduledTask -TaskName "RAG-Watcher"
+    Start-ScheduledTask -TaskName "RAG-ApiServer"
+
+    # Remove
+    Unregister-ScheduledTask -TaskName "RAG-Watcher" -Confirm:$false
+    Unregister-ScheduledTask -TaskName "RAG-ApiServer" -Confirm:$false
+
+View registered tasks in the GUI: `taskschd.msc`
+
+## Watch Path Configuration
+
+The `~/` syntax in `watcher_config.yaml` resolves correctly on Windows
+(`~` expands to `C:\Users\<username>`). For explicit Windows paths,
+see the example config:
+
+    config\watcher_config.windows.yaml
 
 ------------------------------------------------------------------------
 
@@ -237,6 +308,8 @@ Example
 
 # Running the Watcher as a Service
 
+## Linux (systemd)
+
 Create systemd service
 
     sudo nano /etc/systemd/system/rag-watcher.service
@@ -265,6 +338,10 @@ Logs
 
     journalctl -u rag-watcher -f
 
+## Windows 11 (Task Scheduler)
+
+See the **Windows 11 Setup → Auto-Start on Login** section above.
+
 ------------------------------------------------------------------------
 
 # API Server
@@ -289,6 +366,8 @@ Start manually
 ------------------------------------------------------------------------
 
 # Running the API Server as a Service
+
+## Linux (systemd)
 
 Create systemd service
 
@@ -317,6 +396,10 @@ Enable service
 Logs
 
     journalctl -u rag-api -f
+
+## Windows 11 (Task Scheduler)
+
+See the **Windows 11 Setup → Auto-Start on Login** section above.
 
 ------------------------------------------------------------------------
 

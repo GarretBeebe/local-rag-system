@@ -62,7 +62,7 @@ def index_file(path: Path) -> None:
         return
 
     try:
-        text = path.read_text(errors="ignore")
+        text = path.read_text(encoding="utf-8", errors="ignore")
     except Exception as e:
         logger.warning("Skipping unreadable file %s: %s", path, e)
         return

@@ -1,0 +1,41 @@
+# Windows example watcher config.
+# Copy the watch_paths entries you want into config/watcher_config.yaml
+# and restart the watcher.
+#
+# Both ~/  syntax and explicit Windows paths work — Path.expanduser()
+# resolves ~/ to C:\Users\<username> on Windows Python.
+
+watch_paths:
+
+  # Using ~/  syntax (recommended — works cross-platform):
+  - path: "~/Documents"
+    recursive: true
+
+  - path: "~/Code"
+    recursive: true
+
+  # Using explicit Windows paths (also valid, use forward slashes):
+  - path: "C:/Users/garret/Nextcloud/AI-ML"
+    recursive: true
+
+  - path: "D:/Projects"
+    recursive: true
+
+allowed_extensions:
+  - .md
+  - .txt
+  - .py
+  - .yaml
+  - .yml
+  - .json
+  - .toml
+
+ignore_patterns:
+  - ".git"
+  - "__pycache__"
+  - ".venv"
+  - "node_modules"
+  - "dist"
+  - "build"
+  - "Thumbs.db"
+  - "desktop.ini"
