@@ -1,0 +1,65 @@
+name: rag-system
+
+services:
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rag-api:
+    build: .
+    container_name: rag-api
+    restart: unless-stopped
+    command: uvicorn web.api_server:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      QDRANT_HOST: qdrant
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - rag-data:/app/data
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  rag-watcher:
+    build: .
+    container_name: rag-watcher
+    restart: unless-stopped
+    command: python -m indexer.watcher
+    environment:
+      QDRANT_HOST: qdrant
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      CONFIG_PATH: /app/config/watcher_config.container.yaml
+    volumes:
+      - rag-data:/app/data
+      - hf-cache:/root/.cache/huggingface
+      - ${NEXTCLOUD_PATH}:/watch/Nextcloud:ro
+      - ${CODE_PATH}:/watch/Code:ro
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+volumes:
+  qdrant-storage:
+  rag-data:
+  hf-cache:

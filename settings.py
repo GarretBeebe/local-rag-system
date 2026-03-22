@@ -9,20 +9,21 @@ Path resolution lives here so no other module needs __file__ manipulation:
     DOCS_PATH   — manual batch-indexing document directory
 """
 
+import os
 from pathlib import Path
 
 from qdrant_client import QdrantClient
 
 PROJECT_ROOT = Path(__file__).parent
-CONFIG_PATH = PROJECT_ROOT / "config" / "watcher_config.yaml"
+CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config" / "watcher_config.yaml")))
 DOCS_PATH = PROJECT_ROOT / "documents"
 
-QDRANT_HOST = "localhost"
-QDRANT_PORT = 6333
+QDRANT_HOST = os.environ.get("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
 COLLECTION = "documents"
 VECTOR_SIZE = 768
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 EMBED_MODEL = "nomic-embed-text"
 GEN_MODEL = "llama3.1:8b"
 REASON_MODEL = "qwen2.5:14b"
