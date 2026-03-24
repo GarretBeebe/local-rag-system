@@ -137,7 +137,7 @@ Software
 
 -   Docker
 -   Python 3.10+ *(not required for Docker for Windows deployment)*
--   Ollama
+-   Ollama *(not required for Docker for Windows deployment — runs as a container)*
 -   sqlite3 *(not required for Docker for Windows deployment)*
 
 ------------------------------------------------------------------------
@@ -187,24 +187,16 @@ Pull models
 
 # Docker for Windows
 
-The full stack (Qdrant, API server, filesystem watcher) can run in Docker
-for Windows. Ollama continues to run on the Windows host; the containers
-reach it via `host.docker.internal`.
+The full stack (Ollama, Qdrant, API server, filesystem watcher) can run in
+Docker for Windows. Ollama runs as a container alongside the rest of the
+stack — no separate Ollama install is required.
 
 ## Prerequisites
 
 -   [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
     with the WSL2 backend enabled
--   [Ollama](https://ollama.com) installed and running on the Windows host
 
-## 1. Pull Ollama models (on the Windows host)
-
-    ollama pull nomic-embed-text
-    ollama pull llama3.1:8b
-    ollama pull qwen2.5:14b
-    ollama pull qwen2.5-coder:14b
-
-## 2. Configure the filesystem watcher
+## 1. Configure the filesystem watcher
 
 The watcher monitors directories for documents to index. You need to:
 
@@ -230,13 +222,24 @@ Use forward slashes for Windows paths in Docker Compose.
 
     docker compose up -d
 
-This starts three containers: `rag-qdrant`, `rag-api`, and `rag-watcher`.
+This starts four containers: `rag-ollama`, `rag-qdrant`, `rag-api`, and `rag-watcher`.
 
-## 4. Verify
+## 4. Pull Ollama models
+
+Once the stack is running, pull the required models into the Ollama container:
+
+    docker exec rag-ollama ollama pull nomic-embed-text
+    docker exec rag-ollama ollama pull llama3.1:8b
+    docker exec rag-ollama ollama pull qwen2.5:14b
+    docker exec rag-ollama ollama pull qwen2.5-coder:14b
+
+Models are stored in the `ollama-models` Docker named volume and persist across restarts.
+
+## 5. Verify
 
     docker compose ps
 
-All three services should show status `running`.
+All four services should show status `running`.
 
     curl http://localhost:8000/
 
