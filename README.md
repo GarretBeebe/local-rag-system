@@ -127,61 +127,7 @@ The ingestion pipeline supports:
 
 # Requirements
 
-Operating System
-
--   Linux (recommended)
--   macOS
--   Windows (via Docker for Windows — see [Docker for Windows](#docker-for-windows))
-
-Software
-
--   Docker
--   Python 3.10+ *(not required for Docker for Windows deployment)*
--   Ollama *(not required for Docker for Windows deployment — runs as a container)*
--   sqlite3 *(not required for Docker for Windows deployment)*
-
-------------------------------------------------------------------------
-
-# System Package Installation
-
-Ubuntu / Debian
-
-    sudo apt update
-    sudo apt install docker.io docker-compose sqlite3
-
-macOS
-
-    brew install sqlite
-
-sqlite3 stores **file fingerprints** used to detect file changes.
-
-------------------------------------------------------------------------
-
-# Bootstrap Installation
-
-A bootstrap installer is included.
-
-    ./install.sh
-
-------------------------------------------------------------------------
-
-# Manual Installation
-
-Install Python dependencies
-
-    pip install -e .
-
-Start Qdrant
-
-    cd vector-db/qdrant
-    docker compose up -d
-
-Pull models
-
-    ollama pull nomic-embed-text
-    ollama pull llama3.1:8b
-    ollama pull qwen2.5:14b
-    ollama pull qwen2.5-coder:14b
+-   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows, macOS, or Linux)
 
 ------------------------------------------------------------------------
 
@@ -283,11 +229,11 @@ from settings import REASON_MODEL as GEN_MODEL  # for reasoning tasks
 
 Manual indexing
 
-    python ingest/index_documents.py
+    docker exec rag-api python ingest/index_documents.py
 
 Reset collection
 
-    python ingest/reset_collection.py
+    docker exec rag-api python ingest/reset_collection.py
 
 ------------------------------------------------------------------------
 
@@ -297,11 +243,13 @@ Configuration file
 
     config/watcher_config.yaml
 
-Example
+Use container-side mount paths in `watcher_config.yaml` (matching the volume mounts in `docker-compose.yml`):
 
     watch_paths:
-      - path: ~/Nextcloud
-      - path: ~/Code
+      - path: /mnt/nextcloud
+        recursive: true
+      - path: /mnt/code
+        recursive: true
 
     allowed_extensions:
       - .md
@@ -311,38 +259,6 @@ Example
     ignore_patterns:
       - .git
       - node_modules
-
-------------------------------------------------------------------------
-
-# Running the Watcher as a Service
-
-Create systemd service
-
-    sudo nano /etc/systemd/system/rag-watcher.service
-
-    [Unit]
-    Description=Local RAG Document Watcher
-    After=network.target
-
-    [Service]
-    User=garret
-    WorkingDirectory=/home/garret/Code/rag-system
-    ExecStart=/home/garret/Code/rag-system/.venv/bin/python indexer/watcher.py
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-
-Enable service
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable rag-watcher
-    sudo systemctl start rag-watcher
-
-Logs
-
-    journalctl -u rag-watcher -f
 
 ------------------------------------------------------------------------
 
@@ -360,42 +276,6 @@ Endpoints
 | `GET` | `/models` | Alias for `/v1/models` |
 | `POST` | `/v1/chat/completions` | RAG-backed chat completion (supports `"stream": true`) |
 | `POST` | `/chat/completions` | Alias for `/v1/chat/completions` |
-
-Start manually
-
-    uvicorn web.api_server:app --host 0.0.0.0 --port 8000
-
-------------------------------------------------------------------------
-
-# Running the API Server as a Service
-
-Create systemd service
-
-    sudo nano /etc/systemd/system/rag-api.service
-
-    [Unit]
-    Description=Local RAG API Server
-    After=network.target
-
-    [Service]
-    User=garret
-    WorkingDirectory=/home/garret/Code/rag-system
-    ExecStart=/home/garret/Code/rag-system/.venv/bin/uvicorn web.api_server:app --host 0.0.0.0 --port 8000
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-
-Enable service
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable rag-api
-    sudo systemctl start rag-api
-
-Logs
-
-    journalctl -u rag-api -f
 
 ------------------------------------------------------------------------
 
