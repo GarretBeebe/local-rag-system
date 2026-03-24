@@ -131,16 +131,16 @@ The ingestion pipeline supports:
 
 ------------------------------------------------------------------------
 
-# Docker for Windows
+# Docker Deployment
 
-The full stack (Ollama, Qdrant, API server, filesystem watcher) can run in
-Docker for Windows. Ollama runs as a container alongside the rest of the
-stack — no separate Ollama install is required.
+The full stack (Ollama, Qdrant, API server, filesystem watcher) runs entirely
+in Docker. Ollama runs as a container — no separate install required.
+Works on Windows, macOS, and Linux.
 
 ## Prerequisites
 
--   [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
-    with the WSL2 backend enabled
+-   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS)
+    or Docker Engine (Linux)
 
 ## 1. Configure the filesystem watcher
 
@@ -154,15 +154,22 @@ The watcher monitors directories for documents to index. You need to:
       - path: /mnt/code
         recursive: true
 
-**b) Update the `watcher` volume mounts in `docker-compose.yml`** to map
-your Windows directories to those container paths:
+**b) Copy `.env.example` to `.env`** and set your host paths:
+
+    # Windows
+    NEXTCLOUD_PATH=C:/Users/YourName/Nextcloud
+    CODE_PATH=C:/Users/YourName/Code
+
+    # Linux / macOS
+    NEXTCLOUD_PATH=/home/yourname/Nextcloud
+    CODE_PATH=/home/yourname/Code
+
+**c) Uncomment the volume mounts in `docker-compose.yml`** under the `watcher` service:
 
     volumes:
       - ./data:/app/data
-      - C:/Users/YourName/Nextcloud:/mnt/nextcloud
-      - C:/Users/YourName/Code:/mnt/code
-
-Use forward slashes for Windows paths in Docker Compose.
+      - ${NEXTCLOUD_PATH}:/mnt/nextcloud
+      - ${CODE_PATH}:/mnt/code
 
 ## 3. Start the stack
 

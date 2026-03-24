@@ -1,7 +1,7 @@
 version: "3.9"
 
 # ---------------------------------------------------------------------------
-# Full RAG stack for Docker for Windows.
+# Local RAG stack — runs on Windows, macOS, and Linux via Docker.
 #
 # First-time model setup
 # ----------------------
@@ -17,16 +17,16 @@ version: "3.9"
 # Watcher volume mounts
 # ---------------------
 # The watcher service needs access to your local document directories.
-# Edit the volumes section under 'watcher' to map your Windows paths to the
-# container paths listed in config/watcher_config.yaml.
+# Copy .env.example to .env and set your host paths, then uncomment the
+# volumes below to map them to the container paths in watcher_config.yaml.
 #
 # Example — if watcher_config.yaml has:
 #   - path: /mnt/nextcloud
 #   - path: /mnt/code
 #
-# Add these volumes:
-#   - C:/Users/YourName/Nextcloud:/mnt/nextcloud
-#   - C:/Users/YourName/Code:/mnt/code
+# Uncomment and the paths will be read from your .env file:
+#   - ${NEXTCLOUD_PATH}:/mnt/nextcloud
+#   - ${CODE_PATH}:/mnt/code
 # ---------------------------------------------------------------------------
 
 services:
@@ -108,8 +108,8 @@ services:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
       # Mount your document directories here. See note at top of file.
-      # - C:/Users/YourName/Nextcloud:/mnt/nextcloud
-      # - C:/Users/YourName/Code:/mnt/code
+      # - ${NEXTCLOUD_PATH}:/mnt/nextcloud
+      # - ${CODE_PATH}:/mnt/code
 
 volumes:
   ollama-models:
