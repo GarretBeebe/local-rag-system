@@ -3,8 +3,16 @@ version: "3.9"
 # ---------------------------------------------------------------------------
 # Full RAG stack for Docker for Windows.
 #
-# Ollama must be running on the Windows host before starting this stack.
-# The containers reach it via host.docker.internal (Docker Desktop default).
+# First-time model setup
+# ----------------------
+# After starting the stack, pull the required models into the Ollama container:
+#
+#   docker exec rag-ollama ollama pull nomic-embed-text
+#   docker exec rag-ollama ollama pull llama3.1:8b
+#   docker exec rag-ollama ollama pull qwen2.5:14b
+#   docker exec rag-ollama ollama pull qwen2.5-coder:14b
+#
+# Models are stored in the ollama-models named volume and persist across restarts.
 #
 # Watcher volume mounts
 # ---------------------
@@ -22,6 +30,21 @@ version: "3.9"
 # ---------------------------------------------------------------------------
 
 services:
+
+  ollama:
+    image: ollama/ollama
+    container_name: rag-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -52,15 +75,15 @@ services:
     depends_on:
       qdrant:
         condition: service_healthy
+      ollama:
+        condition: service_healthy
     environment:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: http://ollama:11434
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 15s
@@ -75,20 +98,21 @@ services:
     depends_on:
       qdrant:
         condition: service_healthy
+      ollama:
+        condition: service_healthy
     environment:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: http://ollama:11434
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
       # Mount your document directories here. See note at top of file.
       # - C:/Users/YourName/Nextcloud:/mnt/nextcloud
       # - C:/Users/YourName/Code:/mnt/code
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
 volumes:
+  ollama-models:
   qdrant-storage:
   rag-data:
   hf-cache:
