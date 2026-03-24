@@ -1,4 +1,25 @@
-name: rag-system
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Full RAG stack for Docker for Windows.
+#
+# Ollama must be running on the Windows host before starting this stack.
+# The containers reach it via host.docker.internal (Docker Desktop default).
+#
+# Watcher volume mounts
+# ---------------------
+# The watcher service needs access to your local document directories.
+# Edit the volumes section under 'watcher' to map your Windows paths to the
+# container paths listed in config/watcher_config.yaml.
+#
+# Example — if watcher_config.yaml has:
+#   - path: /mnt/nextcloud
+#   - path: /mnt/code
+#
+# Add these volumes:
+#   - C:/Users/YourName/Nextcloud:/mnt/nextcloud
+#   - C:/Users/YourName/Code:/mnt/code
+# ---------------------------------------------------------------------------
 
 services:
 
@@ -12,6 +33,8 @@ services:
     volumes:
       - qdrant-storage:/qdrant/storage
     environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
       QDRANT__TELEMETRY_DISABLED: "true"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
@@ -19,45 +42,51 @@ services:
       timeout: 5s
       retries: 5
 
-  rag-api:
+  api:
     build: .
     container_name: rag-api
     restart: unless-stopped
     command: uvicorn web.api_server:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
+    depends_on:
+      qdrant:
+        condition: service_healthy
     environment:
       QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
       OLLAMA_BASE_URL: http://host.docker.internal:11434
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
-    depends_on:
-      qdrant:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 15s
       timeout: 5s
       retries: 5
 
-  rag-watcher:
+  watcher:
     build: .
     container_name: rag-watcher
     restart: unless-stopped
     command: python -m indexer.watcher
-    environment:
-      QDRANT_HOST: qdrant
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
-      CONFIG_PATH: /app/config/watcher_config.container.yaml
-    volumes:
-      - rag-data:/app/data
-      - hf-cache:/root/.cache/huggingface
-      - ${NEXTCLOUD_PATH}:/watch/Nextcloud:ro
-      - ${CODE_PATH}:/watch/Code:ro
     depends_on:
       qdrant:
         condition: service_healthy
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - rag-data:/app/data
+      - hf-cache:/root/.cache/huggingface
+      # Mount your document directories here. See note at top of file.
+      # - C:/Users/YourName/Nextcloud:/mnt/nextcloud
+      # - C:/Users/YourName/Code:/mnt/code
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   qdrant-storage:

@@ -1,8 +1,8 @@
 """
 Project-level settings: all shared constants and infrastructure clients.
 
-Values are hardcoded here as defaults. Override by setting environment
-variables before running, or by editing this file directly.
+Values can be overridden via environment variables (useful for Docker deployments).
+Defaults assume a bare-metal/local install with all services on localhost.
 
 Path resolution lives here so no other module needs __file__ manipulation:
     CONFIG_PATH — watcher config yaml

@@ -108,6 +108,7 @@ The ingestion pipeline supports:
     │
     ├── vector-db/
     │   └── qdrant/
+    │       └── docker-compose.yml   ← standalone Qdrant only
     │
     ├── data/
     │   └── fingerprints.sqlite3
@@ -115,6 +116,9 @@ The ingestion pipeline supports:
     ├── web/
     │   └── api_server.py
     │
+    ├── Dockerfile
+    ├── docker-compose.yml           ← full stack (Qdrant + API + watcher)
+    ├── .dockerignore
     ├── install.sh
     ├── settings.py
     └── README.md
@@ -127,13 +131,14 @@ Operating System
 
 -   Linux (recommended)
 -   macOS
+-   Windows (via Docker for Windows — see [Docker for Windows](#docker-for-windows))
 
 Software
 
 -   Docker
--   Python 3.10+
+-   Python 3.10+ *(not required for Docker for Windows deployment)*
 -   Ollama
--   sqlite3
+-   sqlite3 *(not required for Docker for Windows deployment)*
 
 ------------------------------------------------------------------------
 
@@ -177,6 +182,77 @@ Pull models
     ollama pull llama3.1:8b
     ollama pull qwen2.5:14b
     ollama pull qwen2.5-coder:14b
+
+------------------------------------------------------------------------
+
+# Docker for Windows
+
+The full stack (Qdrant, API server, filesystem watcher) can run in Docker
+for Windows. Ollama continues to run on the Windows host; the containers
+reach it via `host.docker.internal`.
+
+## Prerequisites
+
+-   [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
+    with the WSL2 backend enabled
+-   [Ollama](https://ollama.com) installed and running on the Windows host
+
+## 1. Pull Ollama models (on the Windows host)
+
+    ollama pull nomic-embed-text
+    ollama pull llama3.1:8b
+    ollama pull qwen2.5:14b
+    ollama pull qwen2.5-coder:14b
+
+## 2. Configure the filesystem watcher
+
+The watcher monitors directories for documents to index. You need to:
+
+**a) Update `config/watcher_config.yaml`** to use container-side mount paths:
+
+    watch_paths:
+      - path: /mnt/nextcloud
+        recursive: true
+      - path: /mnt/code
+        recursive: true
+
+**b) Update the `watcher` volume mounts in `docker-compose.yml`** to map
+your Windows directories to those container paths:
+
+    volumes:
+      - ./data:/app/data
+      - C:/Users/YourName/Nextcloud:/mnt/nextcloud
+      - C:/Users/YourName/Code:/mnt/code
+
+Use forward slashes for Windows paths in Docker Compose.
+
+## 3. Start the stack
+
+    docker compose up -d
+
+This starts three containers: `rag-qdrant`, `rag-api`, and `rag-watcher`.
+
+## 4. Verify
+
+    docker compose ps
+
+All three services should show status `running`.
+
+    curl http://localhost:8000/
+
+Expected: `{"status":"rag-api running"}`
+
+## Logs
+
+    docker compose logs -f api
+    docker compose logs -f watcher
+
+## Stopping
+
+    docker compose down
+
+Vector database data persists in the `qdrant-storage` Docker named volume.
+Fingerprint data persists in `./data/` on the host.
 
 ------------------------------------------------------------------------
 
