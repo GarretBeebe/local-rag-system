@@ -128,19 +128,22 @@ The ingestion pipeline supports:
 # Requirements
 
 -   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows, macOS, or Linux)
+-   [Ollama](https://ollama.com) installed and running on the host
 
 ------------------------------------------------------------------------
 
 # Docker Deployment
 
-The full stack (Ollama, Qdrant, API server, filesystem watcher) runs entirely
-in Docker. Ollama runs as a container — no separate install required.
-Works on Windows, macOS, and Linux.
+Qdrant, the API server, and the filesystem watcher run in Docker.
+Ollama runs on the host for native GPU access — install it from
+[ollama.com](https://ollama.com) and make sure it is running before
+starting the stack. Works on Windows, macOS, and Linux.
 
 ## Prerequisites
 
 -   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS)
     or Docker Engine (Linux)
+-   [Ollama](https://ollama.com) installed and running on the host
 
 ## 1. Configure the filesystem watcher
 
@@ -171,28 +174,26 @@ The watcher monitors directories for documents to index. You need to:
       - ${NEXTCLOUD_PATH}:/mnt/nextcloud
       - ${CODE_PATH}:/mnt/code
 
-## 3. Start the stack
+## 3. Pull Ollama models
+
+Pull the required models on the host before starting the stack:
+
+    ollama pull nomic-embed-text
+    ollama pull llama3.1:8b
+    ollama pull qwen2.5:14b
+    ollama pull qwen2.5-coder:14b
+
+## 4. Start the stack
 
     docker compose up -d
 
-This starts four containers: `rag-ollama`, `rag-qdrant`, `rag-api`, and `rag-watcher`.
-
-## 4. Pull Ollama models
-
-Once the stack is running, pull the required models into the Ollama container:
-
-    docker exec rag-ollama ollama pull nomic-embed-text
-    docker exec rag-ollama ollama pull llama3.1:8b
-    docker exec rag-ollama ollama pull qwen2.5:14b
-    docker exec rag-ollama ollama pull qwen2.5-coder:14b
-
-Models are stored in the `ollama-models` Docker named volume and persist across restarts.
+This starts three containers: `rag-qdrant`, `rag-api`, and `rag-watcher`.
 
 ## 5. Verify
 
     docker compose ps
 
-All four services should show status `running`.
+All three services should show status `running`.
 
     curl http://localhost:8000/
 
