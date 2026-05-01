@@ -105,14 +105,8 @@ ignore_patterns:
   - ".gz"
   - ".mp4"
 
-# Translation and localization files
+  # Translation and localization files
   - "translations"
   - "i18n"
   - "locales"
-  - ".git"
-  - "node_modules"
-  - "__pycache__"
-  - ".venv"
-  - "dist"
-  - "build"
   - "vendor"
