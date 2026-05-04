@@ -29,22 +29,12 @@ def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
 
     context = "\n\n---\n\n".join(context_blocks)
 
-    return f"""You are a careful assistant. Use ONLY the context below to answer.
-If the context is insufficient, say what is missing.
+    return f"""Answer using ONLY the context below. Cite sources as [S1], [S2]. If context is insufficient, say what's missing.
 
-Context:
 {context}
 
-Question:
-{question}
-
-Instructions:
-- Be concise.
-- Cite sources like [S1], [S2] in the answer.
-- Do not invent details not present in the context.
-
-Answer:
-"""
+Question: {question}
+Answer:"""
 
 
 def generate(prompt: str) -> str:
@@ -58,7 +48,7 @@ def generate(prompt: str) -> str:
 
 
 def ask(question: str) -> str:
-    chunks = retrieve_best(question, recall_k=30, mmr_k=10, final_k=6)
+    chunks = retrieve_best(question, recall_k=20, mmr_k=8, final_k=4)
 
     if not chunks:
         return "No relevant context found in the vector store yet."
