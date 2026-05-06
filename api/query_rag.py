@@ -15,7 +15,7 @@ from typing import Any
 import requests
 
 from api.retrieval import retrieve_best
-from settings import GEN_MODEL, OLLAMA_BASE_URL
+from settings import GEN_MODEL, OLLAMA_BASE_URL, RAG_MODE
 
 
 def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
@@ -29,19 +29,27 @@ def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
 
     context = "\n\n---\n\n".join(context_blocks)
 
-    return f"""You are a careful assistant. Use ONLY the context below to answer.
-If the context is insufficient, say what is missing.
+    if RAG_MODE == "augmented":
+        instructions = (
+            "Use the context below to inform your answer where relevant. "
+            "You may supplement with your own knowledge where the context is incomplete. "
+            "Cite sources as [S1], [S2] where context was used. Be concise."
+        )
+    else:
+        instructions = (
+            "Use ONLY the context below to answer. "
+            "If the context is insufficient, say what is missing. "
+            "Cite sources like [S1], [S2] in the answer. "
+            "Do not invent details not present in the context. Be concise."
+        )
+
+    return f"""{instructions}
 
 Context:
 {context}
 
 Question:
 {question}
-
-Instructions:
-- Be concise.
-- Cite sources like [S1], [S2] in the answer.
-- Do not invent details not present in the context.
 
 Answer:
 """
@@ -61,6 +69,8 @@ def ask(question: str) -> str:
     chunks = retrieve_best(question, recall_k=30, mmr_k=10, final_k=6)
 
     if not chunks:
+        if RAG_MODE == "augmented":
+            return generate(question).strip()
         return "No relevant context found in the vector store yet."
 
     prompt = build_prompt(question, chunks)
