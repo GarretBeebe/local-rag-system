@@ -233,6 +233,36 @@ from settings import REASON_MODEL as GEN_MODEL  # for reasoning tasks
 
 ------------------------------------------------------------------------
 
+# Query Modes
+
+The query behavior is controlled by the `RAG_MODE` environment variable,
+which defaults to `strict`.
+
+| Mode | Behavior |
+| --- | --- |
+| `strict` | Answers only from retrieved context. If no relevant chunks are found, returns a "no context found" message rather than guessing. |
+| `augmented` | Uses retrieved context when available and cites it. Supplements with the model's own knowledge when context is incomplete. Falls back to a direct model response if no context is found at all. |
+
+Set the mode in your `.env` file:
+
+    RAG_MODE=strict      # default — grounded answers with citations only
+    RAG_MODE=augmented   # allows model to fill gaps with its own knowledge
+
+**When to use each:**
+
+- **`strict`** is the safer default for a personal knowledge base. Every
+  answer traces back to an indexed document. The model will not invent
+  details.
+- **`augmented`** is useful when you want the model to remain helpful
+  even on questions your documents don't fully cover. Be aware that
+  answers may blend document content with the model's training data,
+  making citations less authoritative.
+
+The mode is forwarded into both the `api` and `watcher` containers via
+`docker-compose.yml`. Changing it requires restarting the stack.
+
+------------------------------------------------------------------------
+
 # Document Ingestion
 
 Manual indexing
@@ -334,6 +364,66 @@ Typical improvements:
 | repository chunking | better code retrieval |
 | caching embeddings | reduces recomputation |
 | larger embedding model | higher semantic accuracy |
+
+------------------------------------------------------------------------
+
+# Hardware Notes
+
+> **These notes are specific to one hardware configuration (GMKtec NUCBox
+> with AMD Radeon integrated graphics). Your GPU vendor, driver stack, and
+> required steps will differ.**
+
+## AMD Radeon iGPU on Windows (Vulkan backend)
+
+By default, Ollama on Windows attempts to use AMD GPUs via the ROCm/HIP
+backend. For discrete AMD GPUs (RX 6000/7000 series, etc.) this works
+after installing the AMD HIP SDK. However, **AMD integrated GPUs (iGPUs)
+found in Ryzen APUs are not supported by ROCm** — Ollama will detect the
+device and then silently fall back to CPU.
+
+The fix is to use Ollama's Vulkan backend instead. AMD has broad Vulkan
+support across all GPU families including iGPUs.
+
+### Steps
+
+1.  Install the [AMD HIP SDK for Windows](https://www.amd.com/en/developer/rocm-hub/hip-sdk.html)
+    (required even for the Vulkan path — Ollama's discovery process uses it)
+
+2.  Set `OLLAMA_VULKAN=1` as a persistent Windows environment variable:
+
+    ```powershell
+    # In PowerShell (no admin required)
+    [System.Environment]::SetEnvironmentVariable("OLLAMA_VULKAN", "1", "User")
+    ```
+
+3.  Fully quit and restart Ollama (right-click tray icon → Quit, then relaunch)
+
+4.  Verify GPU is active:
+
+    ```powershell
+    ollama run llama3.1:8b --keepalive 2m
+    # in a second terminal:
+    ollama ps
+    # should show: 100% GPU
+    ```
+
+### Why this works
+
+Without `OLLAMA_VULKAN=1`, Ollama probes ROCm first and logs
+`"filtering device which didn't fully initialize"` for iGPU targets like
+`gfx1035`. With Vulkan enabled, the iGPU is enumerated correctly and all
+available system memory shared with the GPU is visible to Ollama.
+
+### Notes
+
+-   AMD APUs use shared system RAM as VRAM. The amount visible to Ollama
+    will be larger than the dedicated GPU memory reported by Windows
+    (typically equal to total system RAM minus OS overhead).
+-   This was tested on Ollama 0.23.1 with ROCm 7.1 on Windows 11.
+    Future Ollama versions may add native iGPU support and make this
+    unnecessary.
+-   Other GPU vendors (NVIDIA, Intel Arc) have their own acceleration
+    paths and do not need `OLLAMA_VULKAN=1`.
 
 ------------------------------------------------------------------------
 
