@@ -53,6 +53,7 @@ services:
       QDRANT_PORT: 6333
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       HF_TOKEN: ${HF_TOKEN:-}
+      RAG_MODE: ${RAG_MODE:-strict}
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
@@ -78,6 +79,7 @@ services:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       CONFIG_PATH: /app/config/watcher_config.container.yaml
       HF_TOKEN: ${HF_TOKEN:-}
+      RAG_MODE: ${RAG_MODE:-strict}
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
