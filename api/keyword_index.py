@@ -6,8 +6,10 @@ BM25 index for fast keyword-based recall. Used alongside vector search
 in the hybrid retrieval pipeline.
 """
 
-from rank_bm25 import BM25Okapi
+import heapq
 from typing import Any
+
+from rank_bm25 import BM25Okapi
 
 from settings import COLLECTION, qdrant_client
 
@@ -17,6 +19,7 @@ class KeywordIndex:
     def __init__(self):
         self.docs = []
         self.meta = []
+        self.ids = []
 
         offset = None
         while True:
@@ -30,6 +33,7 @@ class KeywordIndex:
                 tokens = p.payload["text"].lower().split()
                 self.docs.append(tokens)
                 self.meta.append(p.payload)
+                self.ids.append(p.id)
             if next_offset is None:
                 break
             offset = next_offset
@@ -39,5 +43,6 @@ class KeywordIndex:
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         tokens = query.lower().split()
         scores = self.bm25.get_scores(tokens)
-        ranked = sorted(zip(scores, self.meta), reverse=True, key=lambda x: x[0])
-        return [{"payload": payload, "bm25_score": score} for score, payload in ranked[:limit]]
+        pairs = ((s, pid, m) for s, pid, m in zip(scores, self.ids, self.meta) if s > 0)
+        ranked = heapq.nlargest(limit, pairs, key=lambda x: x[0])
+        return [{"id": pid, "payload": payload, "bm25_score": score} for score, pid, payload in ranked]

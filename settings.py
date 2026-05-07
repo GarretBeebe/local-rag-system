@@ -27,6 +27,8 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # "strict"    — answer only from retrieved context; refuse if nothing found
 # "augmented" — use context when found, fall back to model knowledge otherwise
 RAG_MODE = os.environ.get("RAG_MODE", "strict")
+MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
+RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 EMBED_MODEL = "nomic-embed-text"
 GEN_MODEL = "llama3.1:8b"
 REASON_MODEL = "qwen2.5:14b"

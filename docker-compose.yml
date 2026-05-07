@@ -54,6 +54,8 @@ services:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       HF_TOKEN: ${HF_TOKEN:-}
       RAG_MODE: ${RAG_MODE:-strict}
+      RAG_TIMING: ${RAG_TIMING:-0}
+      MMR_ENABLED: ${MMR_ENABLED:-true}
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
