@@ -5,10 +5,10 @@ Kept separate from api.retrieval to avoid loading heavy ML models (CrossEncoder,
 KeywordIndex) in contexts that only need embedding (e.g. batch indexing).
 """
 
-import requests
 from requests import RequestException
 
-from settings import EMBED_MODEL, MAX_EMBED_CHARS, OLLAMA_BASE_URL
+import api.ollama_client as ollama_client
+from settings import EMBED_MODEL, MAX_EMBED_CHARS
 
 
 def embed(text: str) -> list[float]:
@@ -21,8 +21,8 @@ def embed(text: str) -> list[float]:
         text = text[:MAX_EMBED_CHARS]
 
     try:
-        response = requests.post(
-            f"{OLLAMA_BASE_URL}/api/embeddings",
+        response = ollama_client.post(
+            "/api/embeddings",
             json={"model": EMBED_MODEL, "prompt": text},
             timeout=60,
         )

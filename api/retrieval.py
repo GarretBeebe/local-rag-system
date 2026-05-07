@@ -10,14 +10,29 @@ Entry point for callers is retrieve_best(), which runs all three stages and
 returns the top-ranked chunks ready to be passed to the LLM.
 """
 
+import logging
 import math
+import time
+from contextlib import contextmanager
 from typing import Any
 
 from sentence_transformers import CrossEncoder
 
 from api.embed import embed
 from api.keyword_index import KeywordIndex
-from settings import COLLECTION, RERANK_MODEL, qdrant_client
+from settings import COLLECTION, MMR_ENABLED, RAG_TIMING, RERANK_MODEL, qdrant_client
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _timed(label: str):
+    if not RAG_TIMING:
+        yield
+        return
+    t = time.perf_counter()
+    yield
+    logger.debug("%s: %.3fs", label, time.perf_counter() - t)
 
 reranker = CrossEncoder(RERANK_MODEL, device="cpu")
 keyword_index = KeywordIndex()
@@ -33,19 +48,25 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
-def qdrant_recall(question_vec: list[float], limit: int = 30) -> list[dict[str, Any]]:
-    """Returns candidate chunks with payload + vector (vector needed for MMR)."""
-    res = qdrant_client.query_points(
-        collection_name=COLLECTION,
-        query=question_vec,
-        limit=limit,
-        with_payload=True,
-        with_vectors=True,
-    )
-    return [
-        {"id": p.id, "score": p.score, "vector": p.vector, "payload": p.payload}
-        for p in res.points
-    ]
+def qdrant_recall(
+    question_vec: list[float],
+    limit: int = 15,
+    with_vectors: bool = True,
+) -> list[dict[str, Any]]:
+    """Returns candidate chunks; fetches vectors only when needed for MMR."""
+    with _timed("qdrant_recall"):
+        res = qdrant_client.query_points(
+            collection_name=COLLECTION,
+            query=question_vec,
+            limit=limit,
+            with_payload=True,
+            with_vectors=with_vectors,
+        )
+        results = [
+            {"id": p.id, "score": p.score, "vector": p.vector, "payload": p.payload}
+            for p in res.points
+        ]
+    return results
 
 
 def mmr_select(
@@ -60,7 +81,6 @@ def mmr_select(
     results without vectors should be filtered out by the caller.
     """
     def mmr_score(c, selected):
-        """Score a candidate by balancing relevance to the query and diversity."""
         sim_to_query = cosine(question_vec, c["vector"])
         diversity_penalty = (
             max(cosine(c["vector"], s["vector"]) for s in selected)
@@ -79,13 +99,14 @@ def mmr_select(
     return selected
 
 
-def rerank(question: str, candidates: list[dict[str, Any]], top_n: int = 6) -> list[dict[str, Any]]:
+def rerank(question: str, candidates: list[dict[str, Any]], top_n: int = 4) -> list[dict[str, Any]]:
     """Cross-encoder reranking: scores (question, chunk) pairs directly."""
     if not candidates:
         return []
 
-    pairs = [(question, c["payload"]["text"]) for c in candidates]
-    scores = reranker.predict(pairs)
+    with _timed("rerank"):
+        pairs = [(question, c["payload"]["text"]) for c in candidates]
+        scores = reranker.predict(pairs)
 
     for c, s in zip(candidates, scores):
         c["rerank_score"] = float(s)
@@ -96,14 +117,14 @@ def rerank(question: str, candidates: list[dict[str, Any]], top_n: int = 6) -> l
 def hybrid_recall(
     question: str,
     question_vec: list[float],
-    limit: int = 20,
+    limit: int = 15,
 ) -> list[dict[str, Any]]:
     """Combine dense vector recall from Qdrant with BM25 keyword search results."""
-    vector_results = qdrant_recall(question_vec, limit=limit)
+    vector_results = qdrant_recall(question_vec, limit=limit, with_vectors=MMR_ENABLED)
     keyword_results = keyword_index.search(question, limit=limit)
 
     keyword_candidates = [
-        {"payload": r["payload"], "vector": None, "score": r["bm25_score"]}
+        {"id": r["id"], "payload": r["payload"], "vector": None, "score": r["bm25_score"]}
         for r in keyword_results
     ]
 
@@ -112,23 +133,39 @@ def hybrid_recall(
 
 def retrieve_best(
     question: str,
-    recall_k: int = 30,
-    mmr_k: int = 10,
-    final_k: int = 6,
+    recall_k: int = 15,
+    mmr_k: int = 8,
+    final_k: int = 4,
 ) -> list[dict[str, Any]]:
     """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
-    qvec = embed(question)
-    candidates = hybrid_recall(question, qvec, limit=recall_k)
+    with _timed("embed"):
+        qvec = embed(question)
+
+    with _timed("hybrid_recall"):
+        candidates = hybrid_recall(question, qvec, limit=recall_k)
 
     if not candidates:
         return []
+
+    # Dedupe by point id — vector and keyword results can overlap.
+    seen: set = set()
+    deduped = []
+    for c in candidates:
+        if c["id"] not in seen:
+            seen.add(c["id"])
+            deduped.append(c)
+    candidates = deduped
 
     vector_candidates = [c for c in candidates if c.get("vector") is not None]
 
     if not vector_candidates:
         return rerank(question, candidates, top_n=final_k)
 
-    diversified = mmr_select(qvec, vector_candidates, top_n=mmr_k)
-    merged = diversified + [c for c in candidates if c.get("vector") is None]
+    if MMR_ENABLED:
+        with _timed("mmr_select"):
+            diversified = mmr_select(qvec, vector_candidates, top_n=mmr_k)
+    else:
+        diversified = vector_candidates[:mmr_k]
 
+    merged = diversified + [c for c in candidates if c.get("vector") is None]
     return rerank(question, merged, top_n=final_k)

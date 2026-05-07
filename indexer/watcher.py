@@ -19,7 +19,7 @@ from queue import Queue
 
 import yaml
 from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 from indexer.fingerprint_store import delete_hash, get_hash, init_db, upsert_hash
 from ingest.index_documents import delete_document, index_file
@@ -151,7 +151,7 @@ def main() -> None:
 
     initial_scan(config["watch_paths"], handler)
 
-    observer = Observer()
+    observer = PollingObserver()
     for entry, path in _iter_watch_paths(config["watch_paths"]):
         recursive = entry.get("recursive", True)
         logging.info("Watching %s", path)

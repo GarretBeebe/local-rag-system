@@ -1,0 +1,44 @@
+"""Shared HTTP session for all Ollama API calls."""
+
+import json
+from collections.abc import Iterator
+
+import requests
+
+from settings import GEN_MODEL, OLLAMA_BASE_URL
+
+_session = requests.Session()
+
+
+def post(path: str, **kwargs):
+    return _session.post(f"{OLLAMA_BASE_URL}{path}", **kwargs)
+
+
+def generate(prompt: str, timeout: float = 120.0) -> str:
+    """Return a complete generated response from Ollama."""
+    r = post(
+        "/api/generate",
+        json={"model": GEN_MODEL, "prompt": prompt, "stream": False, "options": {"num_ctx": 4096}},
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    return r.json()["response"]
+
+
+def stream_generate(prompt: str, timeout: float = 120.0) -> Iterator[str]:
+    """Yield text chunks from Ollama's streaming generation API."""
+    with post(
+        "/api/generate",
+        json={"model": GEN_MODEL, "prompt": prompt, "stream": True, "options": {"num_ctx": 4096}},
+        stream=True,
+        timeout=timeout,
+    ) as resp:
+        resp.raise_for_status()
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            data = json.loads(line)
+            if data.get("response"):
+                yield data["response"]
+            if data.get("done"):
+                break

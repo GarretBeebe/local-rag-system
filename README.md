@@ -90,6 +90,7 @@ The ingestion pipeline supports:
 
     rag-system/
     ├── api/
+    │   ├── ollama_client.py     ← shared Ollama HTTP session
     │   ├── query_rag.py
     │   ├── retrieval.py
     │   └── keyword_index.py
@@ -263,6 +264,24 @@ The mode is forwarded into both the `api` and `watcher` containers via
 
 ------------------------------------------------------------------------
 
+# Performance Tuning
+
+Two optional environment variables control retrieval behavior and
+instrumentation. Set them in `.env` and restart the `api` container.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `RAG_TIMING` | `0` | Set to `1` to log per-stage timings (embed, recall, rerank, generate) on every request |
+| `MMR_ENABLED` | `true` | Set to `false` to skip MMR diversification; Qdrant results are returned without vectors, reducing payload size and CPU work |
+
+Enable timing to identify which pipeline stage dominates latency on your
+hardware:
+
+    RAG_TIMING=1 docker compose up -d api
+    docker compose logs -f api   # look for embed/recall/rerank/generate lines
+
+------------------------------------------------------------------------
+
 # Document Ingestion
 
 Manual indexing
@@ -276,6 +295,11 @@ Reset collection
 ------------------------------------------------------------------------
 
 # Filesystem Watcher
+
+The watcher uses `watchdog`'s `PollingObserver`, which polls the
+filesystem on a one-second interval. This ensures reliable detection of
+new and modified files on all platforms, including WSL2-mounted Windows
+paths (`/mnt/c/...`) where kernel inotify events are not delivered.
 
 Configuration file
 
@@ -349,21 +373,27 @@ Chatbox configuration
 
 # Performance Notes
 
-Current pipeline stages:
+The query pipeline runs these stages in sequence:
 
-1.  Vector recall
-2.  Keyword recall
-3.  MMR diversification
-4.  Cross‑encoder reranking
+1.  Query embedding (Ollama)
+2.  Hybrid recall — Qdrant vector search + BM25 keyword search
+3.  Deduplication by point ID
+4.  MMR diversification (optional, see `MMR_ENABLED`)
+5.  Cross-encoder reranking (CPU)
+6.  Prompt assembly and LLM generation (Ollama, streamed)
 
-Typical improvements:
+Implemented latency improvements:
 
-| Technique | Improvement |
+| Change | Effect |
 | --- | --- |
-| batch embeddings | 10–30x indexing speed |
-| repository chunking | better code retrieval |
-| caching embeddings | reduces recomputation |
-| larger embedding model | higher semantic accuracy |
+| True Ollama streaming | First token delivered as generation starts, not after full completion |
+| Shared HTTP session | TCP connections to Ollama reused across embed and generate calls |
+| BM25 `heapq.nlargest` | Partial top-k sort replaces full O(n log n) sort on every query |
+| Zero-score BM25 filter | Irrelevant keyword results excluded before reranking |
+| Candidate deduplication | Vector and keyword overlap removed before cross-encoder |
+| Reduced default candidate counts | recall\_k 30→15, mmr\_k 10→8, final\_k 6→4 |
+| Optional MMR disable | `MMR_ENABLED=false` skips vector fetch and cosine work entirely |
+| Per-stage timing | `RAG_TIMING=1` logs each stage's wall time for profiling |
 
 ------------------------------------------------------------------------
 

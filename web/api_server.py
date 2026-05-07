@@ -19,18 +19,18 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
-from typing import Any
+from typing import Any, AsyncIterator
 
-import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import api.ollama_client as ollama_client
 from api.embed import embed
-from api.query_rag import ask
+from api.query_rag import ask, ask_stream_sync
 from api.retrieval import rerank
-from settings import GEN_MODEL, OLLAMA_BASE_URL
+from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,61 @@ async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
     return str(answer or "").strip()
 
 
+async def _rag_stream_response(question: str) -> AsyncIterator[str]:
+    """Bridge ask_stream_sync (sync generator) to an async SSE generator.
+
+    Runs ask_stream_sync in the thread pool and forwards text chunks through
+    an asyncio.Queue so the async event loop can yield them to the client as
+    they arrive from Ollama — giving true time-to-first-token streaming.
+    """
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    request_id = f"chatcmpl-{uuid.uuid4()}"
+    created = int(time.time())
+
+    def _run():
+        try:
+            for text in ask_stream_sync(question):
+                loop.call_soon_threadsafe(queue.put_nowait, text)
+        except Exception as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, exc)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    await _RAG_CONCURRENCY.acquire()
+    future = loop.run_in_executor(_RAG_EXECUTOR, _run)
+    future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
+
+    try:
+        while True:
+            item = await asyncio.wait_for(queue.get(), timeout=120.0)
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                logger.exception("RAG stream error: %s", item)
+                break
+            chunk = {
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": GEN_MODEL,
+                "choices": [{"index": 0, "delta": {"content": item}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
+    except asyncio.TimeoutError:
+        logger.warning("RAG stream timed out waiting for next chunk")
+
+    done_chunk = {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": GEN_MODEL,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(done_chunk)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
 def _build_chat_response(answer: str) -> dict[str, Any]:
     """Build an OpenAI-compatible chat completion response object."""
     answer = answer or "No response generated."
@@ -164,30 +219,6 @@ def _build_chat_response(answer: str) -> dict[str, Any]:
         },
     }
     return response
-
-
-async def _stream_answer(answer: str, response: dict[str, Any]):
-    """Yield answer tokens as an SSE stream compatible with OpenAI clients."""
-    for w in answer.split(" "):
-        chunk = {
-            "id": response["id"],
-            "object": "chat.completion.chunk",
-            "created": response["created"],
-            "model": GEN_MODEL,
-            "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
-        }
-        yield f"data: {json.dumps(chunk)}\n\n"
-        await asyncio.sleep(0)
-
-    done_chunk = {
-        "id": response["id"],
-        "object": "chat.completion.chunk",
-        "created": response["created"],
-        "model": GEN_MODEL,
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-    }
-    yield f"data: {json.dumps(done_chunk)}\n\n"
-    yield "data: [DONE]\n\n"
 
 
 @app.get("/v1/models")
@@ -220,21 +251,16 @@ async def chat(req: ChatRequest):
         )
 
     question = _extract_question_from_messages(req.messages)
-    answer = await _run_rag_with_timeout(question)
-
-    # Normalize the answer once so both JSON and SSE streaming use the same value.
-    normalized_answer = answer if (answer and answer.strip()) else "No response generated."
-    logger.info("Answer: %s", normalized_answer[:200])
-
-    response = _build_chat_response(normalized_answer)
 
     if req.stream:
         return StreamingResponse(
-            _stream_answer(normalized_answer, response),
+            _rag_stream_response(question),
             media_type="text/event-stream",
         )
 
-    return response
+    answer = await _run_rag_with_timeout(question)
+    logger.info("Answer: %s", answer[:200])
+    return _build_chat_response(answer)
 
 
 @app.post("/chat/completions")
@@ -253,8 +279,8 @@ async def _warm_models():
     async def warm_llm():
         try:
             await asyncio.to_thread(
-                requests.post,
-                f"{OLLAMA_BASE_URL}/api/generate",
+                ollama_client.post,
+                "/api/generate",
                 json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
                 timeout=60,
             )

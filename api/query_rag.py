@@ -6,16 +6,23 @@ ask(question) runs the full pipeline:
   2. Build a citation-aware prompt
   3. Send the prompt to the local LLM and print the response with source citations
 
+ask_stream_sync(question) does the same but yields text chunks as they are generated,
+suitable for streaming to clients.
+
 Can be run directly as a script for interactive querying:
   python api/query_rag.py
 """
 
+import logging
+import time
+from collections.abc import Iterator
 from typing import Any
 
-import requests
-
+import api.ollama_client as ollama_client
 from api.retrieval import retrieve_best
-from settings import GEN_MODEL, OLLAMA_BASE_URL, RAG_MODE
+from settings import RAG_MODE, RAG_TIMING
+
+logger = logging.getLogger(__name__)
 
 
 def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
@@ -55,46 +62,54 @@ Answer:
 """
 
 
-def generate(prompt: str) -> str:
-    r = requests.post(
-        f"{OLLAMA_BASE_URL}/api/generate",
-        json={"model": GEN_MODEL, "prompt": prompt, "stream": False},
-        timeout=120,
-    )
-    r.raise_for_status()
-    return r.json()["response"]
-
-
-def ask(question: str) -> str:
-    chunks = retrieve_best(question, recall_k=30, mmr_k=10, final_k=6)
-
-    if not chunks:
-        if RAG_MODE == "augmented":
-            return generate(question).strip()
-        return "No relevant context found in the vector store yet."
-
-    prompt = build_prompt(question, chunks)
-    answer = generate(prompt).strip()
-
-    if "Answer:" in answer:
-        answer = answer.split("Answer:", 1)[1].strip()
-
-    # build sources section
-    sources = []
+def _format_sources(chunks: list[dict[str, Any]]) -> str:
+    lines = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
         path = p.get("filepath", p.get("filename", "unknown"))
         score = c.get("rerank_score", 0)
-        sources.append(f"[S{i}] {path} (rerank={score:.4f})")
+        lines.append(f"[S{i}] {path} (rerank={score:.4f})")
+    return f"\n\n---\n\nSources:\n\n{chr(10).join(lines)}\n"
 
-    return f"""{answer}
 
----
+def ask(question: str) -> str:
+    chunks = retrieve_best(question)
 
-Sources:
+    if not chunks:
+        if RAG_MODE == "augmented":
+            return ollama_client.generate(question).strip()
+        return "No relevant context found in the vector store yet."
 
-{chr(10).join(sources)}
-"""
+    prompt = build_prompt(question, chunks)
+    t0 = time.perf_counter() if RAG_TIMING else None
+    answer = ollama_client.generate(prompt).strip()
+    if RAG_TIMING:
+        logger.debug("generate: %.3fs", time.perf_counter() - t0)
+
+    if "Answer:" in answer:
+        answer = answer.split("Answer:", 1)[1].strip()
+
+    return answer + _format_sources(chunks)
+
+
+def ask_stream_sync(question: str) -> Iterator[str]:
+    """Sync generator: retrieves context then streams generation chunks from Ollama."""
+    chunks = retrieve_best(question)
+
+    if not chunks:
+        if RAG_MODE == "augmented":
+            yield from ollama_client.stream_generate(question)
+        else:
+            yield "No relevant context found in the vector store yet."
+        return
+
+    prompt = build_prompt(question, chunks)
+    t0 = time.perf_counter() if RAG_TIMING else None
+    yield from ollama_client.stream_generate(prompt)
+    if RAG_TIMING:
+        logger.debug("stream_generate: %.3fs", time.perf_counter() - t0)
+
+    yield _format_sources(chunks)
 
 
 if __name__ == "__main__":
