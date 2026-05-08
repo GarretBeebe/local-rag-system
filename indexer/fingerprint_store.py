@@ -82,3 +82,11 @@ def delete_hash(filepath: str) -> None:
             "DELETE FROM fingerprints WHERE filepath=?",
             (_normalize(filepath),),
         )
+
+
+def list_all_paths() -> list[str]:
+    """Return all filepaths currently tracked in the fingerprint store."""
+    conn = _get_conn()
+    with conn:
+        rows = conn.execute("SELECT filepath FROM fingerprints").fetchall()
+    return [row[0] for row in rows]

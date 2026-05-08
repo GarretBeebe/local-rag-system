@@ -22,6 +22,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
 from indexer.fingerprint_store import delete_hash, get_hash, init_db, upsert_hash
+from ingest.cleanup_stale import cleanup_stale
 from ingest.index_documents import delete_document, index_file
 from settings import CONFIG_PATH
 
@@ -149,6 +150,7 @@ def main() -> None:
     worker = IndexWorker()
     handler = WatchHandler(config, worker)
 
+    cleanup_stale()
     initial_scan(config["watch_paths"], handler)
 
     observer = PollingObserver()
