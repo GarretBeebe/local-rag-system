@@ -99,7 +99,7 @@ def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
     return question
 
 
-async def _run_rag_with_timeout(question: str, timeout: float = 120.0) -> str:
+async def _run_rag_with_timeout(question: str, timeout: float = 240.0) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work.
 
     The semaphore counts in-flight executor tasks, not just requests waiting
