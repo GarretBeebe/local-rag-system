@@ -154,7 +154,7 @@ def main() -> None:
     cleanup_stale(accessible_roots)
     initial_scan(config["watch_paths"], handler)
 
-    observer = PollingObserver()
+    observer = PollingObserver(timeout=30)
     for entry, path in _iter_watch_paths(config["watch_paths"]):
         recursive = entry.get("recursive", True)
         logging.info("Watching %s", path)
