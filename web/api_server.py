@@ -19,7 +19,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,8 +67,8 @@ async def log_requests(request, call_next):
 
 
 class ChatMessage(BaseModel):
-    role: str
-    content: Any
+    role: Literal["user", "assistant", "system", "tool"]
+    content: str | list[dict[str, str]]
 
 
 class ChatRequest(BaseModel):

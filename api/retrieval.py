@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def _timed(label: str):
+def timed(label: str):
     if not RAG_TIMING:
         yield
         return
@@ -54,7 +54,7 @@ def qdrant_recall(
     with_vectors: bool = True,
 ) -> list[dict[str, Any]]:
     """Returns candidate chunks; fetches vectors only when needed for MMR."""
-    with _timed("qdrant_recall"):
+    with timed("qdrant_recall"):
         res = qdrant_client.query_points(
             collection_name=COLLECTION,
             query=question_vec,
@@ -104,7 +104,7 @@ def rerank(question: str, candidates: list[dict[str, Any]], top_n: int = 4) -> l
     if not candidates:
         return []
 
-    with _timed("rerank"):
+    with timed("rerank"):
         pairs = [(question, c["payload"]["text"]) for c in candidates]
         scores = reranker.predict(pairs)
 
@@ -138,10 +138,10 @@ def retrieve_best(
     final_k: int = 4,
 ) -> list[dict[str, Any]]:
     """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
-    with _timed("embed"):
+    with timed("embed"):
         qvec = embed(question)
 
-    with _timed("hybrid_recall"):
+    with timed("hybrid_recall"):
         candidates = hybrid_recall(question, qvec, limit=recall_k)
 
     if not candidates:
@@ -162,7 +162,7 @@ def retrieve_best(
         return rerank(question, candidates, top_n=final_k)
 
     if MMR_ENABLED:
-        with _timed("mmr_select"):
+        with timed("mmr_select"):
             diversified = mmr_select(qvec, vector_candidates, top_n=mmr_k)
     else:
         diversified = vector_candidates[:mmr_k]

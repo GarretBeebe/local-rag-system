@@ -112,13 +112,15 @@ class WatchHandler(FileSystemEventHandler):
         if self._should_enqueue_file(path):
             self.worker.submit(path)
 
-    def on_created(self, event) -> None:
+    def _handle_file_event(self, event) -> None:
         if not event.is_directory:
             self.enqueue(event.src_path)
 
+    def on_created(self, event) -> None:
+        self._handle_file_event(event)
+
     def on_modified(self, event) -> None:
-        if not event.is_directory:
-            self.enqueue(event.src_path)
+        self._handle_file_event(event)
 
     def on_deleted(self, event) -> None:
         if not event.is_directory and self._should_enqueue_file(event.src_path):

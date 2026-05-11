@@ -14,22 +14,27 @@ Can be run directly as a script for interactive querying:
 """
 
 import logging
-import time
 from collections.abc import Iterator
 from typing import Any
 
 import api.ollama_client as ollama_client
-from api.retrieval import retrieve_best
-from settings import RAG_MODE, RAG_TIMING
+from api.retrieval import retrieve_best, timed
+from settings import RAG_MODE
 
 logger = logging.getLogger(__name__)
+
+_NO_CONTEXT_REPLY = "No relevant context found in the vector store yet."
+
+
+def _resolve_source(payload: dict[str, Any]) -> str:
+    return payload.get("filepath", payload.get("filename", "unknown"))
 
 
 def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
     context_blocks = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
-        source = p.get("filepath", p.get("filename", "unknown"))
+        source = _resolve_source(p)
         chunk_ref = f"{p.get('chunk_index', '?')}/{p.get('chunk_total', '?')}"
         cite = f"[S{i}] {source} (chunk {chunk_ref})"
         context_blocks.append(f"{cite}\n{p['text']}")
@@ -66,7 +71,7 @@ def _format_sources(chunks: list[dict[str, Any]]) -> str:
     lines = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
-        path = p.get("filepath", p.get("filename", "unknown"))
+        path = _resolve_source(p)
         score = c.get("rerank_score", 0)
         lines.append(f"[S{i}] {path} (rerank={score:.4f})")
     return f"\n\n---\n\nSources:\n\n{chr(10).join(lines)}\n"
@@ -78,13 +83,11 @@ def ask(question: str) -> str:
     if not chunks:
         if RAG_MODE == "augmented":
             return ollama_client.generate(question).strip()
-        return "No relevant context found in the vector store yet."
+        return _NO_CONTEXT_REPLY
 
     prompt = build_prompt(question, chunks)
-    t0 = time.perf_counter() if RAG_TIMING else None
-    answer = ollama_client.generate(prompt).strip()
-    if RAG_TIMING:
-        logger.debug("generate: %.3fs", time.perf_counter() - t0)
+    with timed("generate"):
+        answer = ollama_client.generate(prompt).strip()
 
     if "Answer:" in answer:
         answer = answer.split("Answer:", 1)[1].strip()
@@ -100,14 +103,12 @@ def ask_stream_sync(question: str) -> Iterator[str]:
         if RAG_MODE == "augmented":
             yield from ollama_client.stream_generate(question)
         else:
-            yield "No relevant context found in the vector store yet."
+            yield _NO_CONTEXT_REPLY
         return
 
     prompt = build_prompt(question, chunks)
-    t0 = time.perf_counter() if RAG_TIMING else None
-    yield from ollama_client.stream_generate(prompt)
-    if RAG_TIMING:
-        logger.debug("stream_generate: %.3fs", time.perf_counter() - t0)
+    with timed("stream_generate"):
+        yield from ollama_client.stream_generate(prompt)
 
     yield _format_sources(chunks)
 
