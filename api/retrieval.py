@@ -134,7 +134,7 @@ def hybrid_recall(
 def retrieve_best(
     question: str,
     recall_k: int = 15,
-    mmr_k: int = 8,
+    mmr_k: int = 12,
     final_k: int = 4,
 ) -> list[dict[str, Any]]:
     """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
