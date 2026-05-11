@@ -30,7 +30,7 @@ RAG_MODE = os.environ.get("RAG_MODE", "strict")
 MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 EMBED_MODEL = "nomic-embed-text"
-GEN_MODEL = "llama3.1:8b"
+GEN_MODEL = "qwen2.5:14b"
 REASON_MODEL = "qwen2.5:14b"
 CODE_MODEL = "qwen2.5-coder:14b"
 RERANK_MODEL = "BAAI/bge-reranker-base"
