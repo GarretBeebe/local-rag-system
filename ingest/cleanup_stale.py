@@ -17,13 +17,22 @@ from ingest.index_documents import delete_document
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def cleanup_stale() -> int:
+def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
     """Delete vectors and hashes for every tracked path that no longer exists.
+
+    If accessible_roots is provided, only files whose parent watch root appears
+    in that list are eligible for deletion. This prevents mass-deletion when a
+    bind mount is temporarily empty or unavailable.
+
     Returns the number of entries removed."""
     paths = list_all_paths()
     removed = 0
     for filepath in paths:
-        if not Path(filepath).exists():
+        p = Path(filepath)
+        if accessible_roots is not None:
+            if not any(p.is_relative_to(root) for root in accessible_roots):
+                continue
+        if not p.exists():
             logging.info("Removing stale entry: %s", filepath)
             delete_document(filepath)
             delete_hash(filepath)

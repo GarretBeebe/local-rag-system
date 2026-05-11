@@ -150,7 +150,8 @@ def main() -> None:
     worker = IndexWorker()
     handler = WatchHandler(config, worker)
 
-    cleanup_stale()
+    accessible_roots = [path for _, path in _iter_watch_paths(config["watch_paths"])]
+    cleanup_stale(accessible_roots)
     initial_scan(config["watch_paths"], handler)
 
     observer = PollingObserver()

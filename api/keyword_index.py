@@ -38,9 +38,11 @@ class KeywordIndex:
                 break
             offset = next_offset
 
-        self.bm25 = BM25Okapi(self.docs)
+        self.bm25 = BM25Okapi(self.docs) if self.docs else None
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        if self.bm25 is None:
+            return []
         tokens = query.lower().split()
         scores = self.bm25.get_scores(tokens)
         pairs = ((s, pid, m) for s, pid, m in zip(scores, self.ids, self.meta) if s > 0)
