@@ -168,6 +168,16 @@ The watcher monitors directories for documents to index. You need to:
     NEXTCLOUD_PATH=/home/yourname/Nextcloud
     CODE_PATH=/home/yourname/Code
 
+If the API is exposed beyond localhost (e.g. behind a reverse proxy), set an API key:
+
+    API_KEY=<generate with: openssl rand -hex 32>
+
+When `API_KEY` is set, all endpoints except `GET /` require the header:
+
+    Authorization: Bearer <your-key>
+
+Leave `API_KEY` empty (the default) to disable auth for purely local use.
+
 **c) Uncomment the volume mounts in `docker-compose.yml`** under the `watcher` service:
 
     volumes:
@@ -357,14 +367,14 @@ Open WebUI quick start
 
     docker run -d -p 3000:8080 \
       -e OPENAI_API_BASE_URL=http://host.docker.internal:8000/v1 \
-      -e OPENAI_API_KEY=local \
+      -e OPENAI_API_KEY=<your API_KEY> \
       ghcr.io/open-webui/open-webui:main
 
 Chatbox configuration
 
 -   API Mode: OpenAI API
--   API Host: `http://localhost:8000`
--   API Key: `local` (any non-empty value)
+-   API Host: `http://localhost:8000` (or your remote URL)
+-   API Key: the value of `API_KEY` from your `.env` (any non-empty string if auth is disabled)
 -   Model: select from the list populated by `/v1/models`
 
 ------------------------------------------------------------------------
@@ -509,6 +519,16 @@ Local‑first architecture:
 -   models run locally
 -   vector database local
 -   documents never leave machine
+
+Runtime controls:
+
+| Control | Detail |
+| --- | --- |
+| API key auth | Set `API_KEY` in `.env`. All endpoints except `GET /` require `Authorization: Bearer <key>`. Disabled when `API_KEY` is empty. |
+| Rate limiting | 30 requests per minute per IP. Exceeding the limit returns `429`. |
+| CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins, defaults to `*`). |
+| Qdrant isolation | Qdrant is not bound to any host port — only reachable within the Docker network. |
+| Read-only mounts | Watcher volume mounts use `:ro` — the container cannot write to your document directories. |
 
 ------------------------------------------------------------------------
 
