@@ -72,7 +72,7 @@ app = FastAPI(title="Local RAG API", lifespan=lifespan)
 
 
 @app.middleware("http")
-async def security_middleware(request: Request, call_next):
+async def security_middleware(request: Request, call_next: Callable[..., Any]):
     logger.info("%s %s", request.method, request.url.path)
 
     # Health check bypasses auth and rate limiting so Docker healthcheck works
@@ -206,43 +206,34 @@ async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
                 break
             if isinstance(item, Exception):
                 logger.error("RAG stream error: %s", item)
-                error_chunk = {
-                    "id": request_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": model,
-                    "choices": [{"index": 0, "delta": {"content": f"\n\n[Generation error: {item}]"}, "finish_reason": None}],
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
+                yield _make_stream_chunk(request_id, created, model, content=f"\n\n[Generation error: {item}]")
                 break
-            chunk = {
-                "id": request_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "choices": [{"index": 0, "delta": {"content": item}, "finish_reason": None}],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n"
+            yield _make_stream_chunk(request_id, created, model, content=item)
     except asyncio.TimeoutError:
         logger.warning("RAG stream timed out waiting for next chunk")
-        timeout_chunk = {
-            "id": request_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "choices": [{"index": 0, "delta": {"content": "\n\n[Error: generation timed out]"}, "finish_reason": None}],
-        }
-        yield f"data: {json.dumps(timeout_chunk)}\n\n"
+        yield _make_stream_chunk(request_id, created, model, content="\n\n[Error: generation timed out]")
 
-    done_chunk = {
+    yield _make_stream_chunk(request_id, created, model, finish_reason="stop")
+    yield "data: [DONE]\n\n"
+
+
+def _make_stream_chunk(
+    request_id: str,
+    created: int,
+    model: str,
+    *,
+    content: str | None = None,
+    finish_reason: str | None = None,
+) -> str:
+    delta: dict[str, str] = {"content": content} if content is not None else {}
+    chunk = {
         "id": request_id,
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
     }
-    yield f"data: {json.dumps(done_chunk)}\n\n"
-    yield "data: [DONE]\n\n"
+    return f"data: {json.dumps(chunk)}\n\n"
 
 
 def _build_chat_response(answer: str, model: str) -> dict[str, Any]:
