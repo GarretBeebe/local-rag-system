@@ -13,6 +13,7 @@ Run with:
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import time
@@ -29,9 +30,10 @@ import bcrypt as _bcrypt
 import jwt as pyjwt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import api.ollama_client as ollama_client
 from api.embed import embed
@@ -58,14 +60,16 @@ async def _check_rate_limit(ip: str) -> bool:
     async with _rate_lock:
         now = time.monotonic()
         _rate_buckets[ip] = [t for t in _rate_buckets[ip] if now - t < _RATE_WINDOW]
-        if len(_rate_buckets[ip]) >= _RATE_MAX:
+        if not _rate_buckets[ip]:
+            del _rate_buckets[ip]
+        elif len(_rate_buckets[ip]) >= _RATE_MAX:
             return False
         _rate_buckets[ip].append(now)
         return True
 
 
 def _is_valid_token(token: str) -> bool:
-    if API_KEY and token == API_KEY:
+    if API_KEY and hmac.compare_digest(token, API_KEY):
         return True
     if JWT_SECRET:
         try:
@@ -79,6 +83,8 @@ def _is_valid_token(token: str) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     user_store.init_db()
+    if not API_KEY and not JWT_SECRET:
+        logger.warning("Authentication is DISABLED — set API_KEY or JWT_SECRET in .env")
     warm_task = asyncio.create_task(_warm_models())
     try:
         yield
@@ -92,19 +98,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
 app.mount("/ui", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
 
-_BYPASS_PATHS = {"/", "/auth/login"}
-
-
 @app.middleware("http")
 async def security_middleware(request: Request, call_next: Callable[..., Any]):
     logger.info("%s %s", request.method, request.url.path)
 
-    if request.url.path in _BYPASS_PATHS or request.url.path.startswith("/ui"):
+    # Health check, favicon, and static UI bypass auth and rate limiting
+    if request.url.path in ("/", "/favicon.ico") or request.url.path.startswith("/ui"):
         return await call_next(request)
 
     client_ip = request.client.host if request.client else "unknown"
     if not await _check_rate_limit(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+
+    # Login endpoint is rate-limited but does not require a token
+    if request.url.path == "/auth/login":
+        return await call_next(request)
 
     if API_KEY or JWT_SECRET:
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
@@ -124,9 +132,25 @@ app.add_middleware(
 )
 
 
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Callable[..., Any]) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'"
+        )
+        return response
+
+
+app.add_middleware(_SecurityHeadersMiddleware)
+
+
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=128)
+    password: str = Field(max_length=128)
 
 
 class ChatMessage(BaseModel):
@@ -247,7 +271,7 @@ async def _rag_stream_response(
             if isinstance(item, Exception):
                 logger.error("RAG stream error: %s", item)
                 yield _make_stream_chunk(
-                    request_id, created, model, content=f"\n\n[Generation error: {item}]"
+                    request_id, created, model, content="\n\n[Generation error — please retry]"
                 )
                 break
             yield _make_stream_chunk(request_id, created, model, content=item)

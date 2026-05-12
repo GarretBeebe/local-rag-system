@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local RAG</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/ui/marked.min.js"></script>
+  <script src="/ui/purify.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -358,7 +359,7 @@
       const div = document.createElement('div');
       div.className = `msg ${role}`;
       if (role === 'assistant') {
-        div.innerHTML = html;
+        div.innerHTML = DOMPurify.sanitize(html);
       } else {
         div.textContent = html; // plain text for user and error roles
       }
@@ -438,7 +439,7 @@
               thinking.remove();
               assistantDiv = appendMessage('assistant', marked.parse(accumulated));
             } else {
-              assistantDiv.innerHTML = marked.parse(accumulated);
+              assistantDiv.innerHTML = DOMPurify.sanitize(marked.parse(accumulated));
               messagesEl.scrollTop = messagesEl.scrollHeight;
             }
           }
