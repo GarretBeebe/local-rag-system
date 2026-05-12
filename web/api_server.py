@@ -102,8 +102,8 @@ app.mount("/ui", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
 async def security_middleware(request: Request, call_next: Callable[..., Any]):
     logger.info("%s %s", request.method, request.url.path)
 
-    # Health check and static UI bypass auth and rate limiting
-    if request.url.path == "/" or request.url.path.startswith("/ui"):
+    # Health check, favicon, and static UI bypass auth and rate limiting
+    if request.url.path in ("/", "/favicon.ico") or request.url.path.startswith("/ui"):
         return await call_next(request)
 
     client_ip = request.client.host if request.client else "unknown"
@@ -139,8 +139,9 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline'"
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline'; "
+            "connect-src 'self' https://cdn.jsdelivr.net"
         )
         return response
 
