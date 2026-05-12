@@ -31,87 +31,65 @@ It should feel lightweight — not a full app framework.
 
 ## Authentication
 
-**Mechanism: HTTP Basic Auth enforced server-side on all API routes.**
+**Mechanism: Bearer token auth using the existing `API_KEY` env var.**
 
-Credentials are stored as bcrypt hashes in an `AUTH_USERS` environment
-variable — one `username:hash` pair per line. The server parses them at
-startup into an in-memory lookup. If `AUTH_USERS` is not set, the server
-runs unauthenticated (local-only use case, existing behavior preserved).
+The server already enforces `Authorization: Bearer <API_KEY>` on all
+non-health-check endpoints via `security_middleware` in `web/api_server.py`.
+No new server-side auth logic is needed.
 
 ### Server side (`web/api_server.py`)
 
-Add a FastAPI dependency injected into every API route (all routes under
-`/v1/*` and `/chat/*`). The dependency:
+One small change only: extend the bypass in `security_middleware` to also
+allow unauthenticated access to `/ui/` paths, so the HTML shell loads in
+the browser before the user has entered a key:
 
-1. Reads the `Authorization` header.
-2. Decodes the base64 `Basic <credentials>` value to extract `username:password`.
-3. Looks up the username in the parsed `AUTH_USERS` dict.
-4. Verifies the password against the stored bcrypt hash using `passlib`.
-5. Raises `HTTPException(401)` with `WWW-Authenticate: Basic realm="RAG"`
-   on any failure (missing header, unknown user, wrong password).
+```python
+if (request.url.path == "/" and request.method == "GET") or \
+        request.url.path.startswith("/ui/"):
+    return await call_next(request)
+```
 
-The static file mount (`/ui/`) and the health check route (`GET /`) are
-**not** covered by this dependency — they remain public. The HTML shell is
-harmless without valid API credentials.
+The HTML page itself is harmless without a valid key — all API calls it
+makes will be rejected with 401 until the correct key is supplied.
 
 ### Client side (`web/index.html`)
 
-The UI stores credentials in `sessionStorage` after the user logs in and
-includes them as an `Authorization: Basic <base64>` header on every
-`fetch()` call. Flow:
+The UI stores the API key in `sessionStorage` after the user enters it and
+includes it as `Authorization: Bearer <key>` on every `fetch()` call. Flow:
 
-1. On load, attempt `GET /v1/models` with any stored credentials.
-2. If the response is `401`, show a login form (username + password fields).
-3. On submit, encode `username:password` as base64, store in `sessionStorage`,
-   retry the request.
+1. On load, attempt `GET /v1/models` with any stored key.
+2. If the response is `401` (or no key is stored), show a login form with a
+   single API key field.
+3. On submit, store the key in `sessionStorage` and retry the request.
 4. If the retry succeeds, proceed to the chat UI.
 5. If any subsequent API call returns `401`, clear `sessionStorage` and show
-   the login form again (handles password changes or session expiry).
-
-The browser's native Basic Auth dialog is deliberately bypassed; the custom
-form gives a consistent UI and avoids the browser caching credentials in a
-way that's hard to clear.
+   the login form again (handles key rotation).
 
 ### Credential management
 
-Passwords must be hashed before adding to `AUTH_USERS`. Provide a helper
-command in the README:
+The API key is the value of `API_KEY` in `.env`. No hashing, no user
+accounts. To rotate the key: update `.env` and run `docker compose up -d api`.
 
-```bash
-python -c "from passlib.hash import bcrypt; print(bcrypt.hash('yourpassword'))"
-```
+### No new dependencies
 
-Then set in `.env`:
-
-```
-AUTH_USERS=alice:$2b$12$...
-  bob:$2b$12$...
-```
-
-Multiline env vars work in `.env` files and are passed correctly by
-docker-compose.
-
-### New dependency
-
-Add `passlib[bcrypt]` to `pyproject.toml`. No other new dependencies.
+`passlib[bcrypt]` is **not** needed. Remove it from the plan.
 
 ### Security note
 
-Basic Auth over plain HTTP sends credentials base64-encoded (not encrypted)
-on every request. This is acceptable on a trusted local network. If the API
-is ever exposed beyond localhost, put a TLS-terminating reverse proxy (nginx,
-Caddy) in front. Document this clearly in the README.
+TLS is already in place via Caddy (`ai.spoonscloud.duckdns.org`). The API
+key is never transmitted in plaintext over the internet. For local network
+use (`http://localhost:8000/ui/`), the key transits in plaintext — acceptable
+on loopback.
 
 ## Files to Touch
 
 | File | Change |
 |------|--------|
-| `web/index.html` | New — full UI with login form and chat (HTML + embedded CSS + JS) |
-| `web/api_server.py` | Mount `StaticFiles` at `/ui`; auth dependency on all API routes |
-| `settings.py` | Parse `AUTH_USERS` env var into a `dict[str, str]` at startup |
-| `pyproject.toml` | Add `passlib[bcrypt]` dependency |
-| `.env.example` | Add `AUTH_USERS` example with a placeholder hash |
-| `docker-compose.yml` | Pass `AUTH_USERS` env var through to the `api` service |
+| `web/index.html` | New — full UI with API key login form and chat (HTML + embedded CSS + JS) |
+| `web/api_server.py` | Mount `StaticFiles` at `/ui`; extend `security_middleware` bypass to cover `/ui/` paths |
+| `settings.py` | No change — `API_KEY` already parsed |
+| `.env.example` | No change — `API_KEY` already documented |
+| `docker-compose.yml` | No change — `API_KEY` already passed through |
 
 ## UI Layout
 
@@ -176,17 +154,13 @@ container. The two can coexist since they hit the same API.
   displays, just unstyled. Mitigation: vendor the script into `web/` if needed.
 - **Streaming in older browsers**: `fetch` + `ReadableStream` works in all
   modern browsers. Not a concern for a local tool.
-- **Plaintext credentials in transit**: Basic Auth is not encrypted over HTTP.
-  Credentials are exposed on the network to any observer. Acceptable on
-  localhost or a trusted LAN; a blocker if the API is exposed to the internet.
-  Mitigation: document the TLS reverse-proxy requirement prominently.
-- **`sessionStorage` credential storage**: Credentials stored in
-  `sessionStorage` are cleared when the tab closes but are readable by any JS
-  on the page. Since there is no third-party JS (only the optional CDN script),
-  the attack surface is minimal. Vendoring `marked.js` eliminates it entirely.
-- **Timing attacks on password comparison**: `passlib`'s `verify()` uses
-  constant-time comparison; this is safe. Do not replace it with a plain
-  string comparison.
+- **API key in transit**: When accessed via `ai.spoonscloud.duckdns.org`,
+  the key transits over TLS (Caddy). When accessed via `localhost`, it
+  transits in plaintext — acceptable on loopback. No action needed.
+- **`sessionStorage` key storage**: The API key stored in `sessionStorage`
+  is cleared when the tab closes but is readable by any JS on the page.
+  Since there is no third-party JS (only the optional CDN script), the
+  attack surface is minimal. Vendoring `marked.js` eliminates it entirely.
 
 ## Success Criteria
 
@@ -194,8 +168,8 @@ container. The two can coexist since they hit the same API.
 2. The model dropdown lists whatever models are in Ollama
 3. Sending a question returns a streamed answer that renders as markdown
 4. Errors (timeout, pipeline failure) display inline in the chat
-5. No new containers, no build step, no new dependencies beyond `marked.js` and `passlib[bcrypt]`
-6. With `AUTH_USERS` set: unauthenticated requests to `/v1/*` return `401`
-7. With `AUTH_USERS` set: the login form appears, valid credentials grant access, invalid credentials re-prompt
-8. With `AUTH_USERS` unset: the server behaves exactly as it does today (no auth, no breaking change)
-9. A user not in `AUTH_USERS` cannot reach any API endpoint regardless of what credentials they supply
+5. No new containers, no build step, no new dependencies beyond `marked.js`
+6. With `API_KEY` set: unauthenticated requests to `/v1/*` return `401`
+7. With `API_KEY` set: the login form appears, the correct key grants access, wrong key re-prompts
+8. With `API_KEY` unset: the server runs without auth (existing local-only behavior preserved)
+9. `/ui/` paths load without a key so the login form is reachable in the browser
