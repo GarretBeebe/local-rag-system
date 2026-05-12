@@ -38,33 +38,30 @@ def cmd_list() -> None:
     users = list_users()
     if not users:
         print("No users.")
-    else:
-        for u in users:
-            print(u)
+        return
+    for username in users:
+        print(username)
+
+
+def _exit_with_error(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(1)
 
 
 def main() -> None:
     init_db()
     args = sys.argv[1:]
     if not args:
-        print("Usage: manage_users.py <add|remove|list> [username]", file=sys.stderr)
-        sys.exit(1)
+        _exit_with_error("Usage: manage_users.py <add|remove|list> [username]")
     cmd, *rest = args
-    if cmd == "add":
+    if cmd in ("add", "remove"):
         if not rest:
-            print("Usage: manage_users.py add <username>", file=sys.stderr)
-            sys.exit(1)
-        cmd_add(rest[0])
-    elif cmd == "remove":
-        if not rest:
-            print("Usage: manage_users.py remove <username>", file=sys.stderr)
-            sys.exit(1)
-        cmd_remove(rest[0])
+            _exit_with_error(f"Usage: manage_users.py {cmd} <username>")
+        (cmd_add if cmd == "add" else cmd_remove)(rest[0])
     elif cmd == "list":
         cmd_list()
     else:
-        print(f"Unknown command: {cmd!r}", file=sys.stderr)
-        sys.exit(1)
+        _exit_with_error(f"Unknown command: {cmd!r}")
 
 
 if __name__ == "__main__":

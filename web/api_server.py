@@ -346,10 +346,12 @@ async def login(credentials: LoginRequest) -> dict[str, str]:
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Web UI login not configured")
     stored = user_store.get_hash(credentials.username)
-    valid = stored and await asyncio.to_thread(
+    if not stored:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    password_matches = await asyncio.to_thread(
         _bcrypt.checkpw, credentials.password.encode(), stored.encode()
     )
-    if not valid:
+    if not password_matches:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     exp = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS)
     token = pyjwt.encode({"sub": credentials.username, "exp": exp}, JWT_SECRET, algorithm="HS256")

@@ -27,7 +27,6 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = _get_conn()
     with conn:
         conn.execute("""
