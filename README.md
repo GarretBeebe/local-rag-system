@@ -220,17 +220,19 @@ Three Ollama models are configured in `settings.py`:
 
 | Variable | Model | Purpose |
 | --- | --- | --- |
-| `GEN_MODEL` | `llama3.1:8b` | General chat and Q&A |
+| `GEN_MODEL` | `qwen2.5:14b` | Default model for chat and Q&A |
 | `REASON_MODEL` | `qwen2.5:14b` | Reasoning and analysis |
 | `CODE_MODEL` | `qwen2.5-coder:14b` | Code-related queries |
 
-The RAG pipeline and API server use `GEN_MODEL` by default. To switch
-to a different model, update the import in `api/query_rag.py`:
+The API server honors the `model` field in every request — clients can
+select any model already pulled in Ollama without restarting the stack.
+`GEN_MODEL` is used only as the fallback when the `/v1/models` endpoint
+cannot reach Ollama.
 
-```python
-from settings import CODE_MODEL as GEN_MODEL   # for code queries
-from settings import REASON_MODEL as GEN_MODEL  # for reasoning tasks
-```
+`GET /v1/models` returns the live list of models from Ollama so clients
+can discover what is available:
+
+    curl http://localhost:8000/v1/models
 
 ------------------------------------------------------------------------
 
@@ -344,8 +346,9 @@ Endpoints
 # Chat Clients
 
 Any OpenAI-compatible chat client can connect to the API server.
-Point the client at `http://<host>:8000` and select the model
-`llama3.1:8b` (or whichever model is set as `GEN_MODEL`).
+Point the client at `http://<host>:8000`. The model list is populated
+dynamically from `GET /v1/models` — select any model already pulled in
+Ollama.
 
 Recommended clients:
 
@@ -367,7 +370,7 @@ Chatbox configuration
 -   API Mode: OpenAI API
 -   API Host: `http://localhost:8000`
 -   API Key: `local` (any non-empty value)
--   Model: `llama3.1:8b`
+-   Model: select from the list populated by `/v1/models`
 
 ------------------------------------------------------------------------
 
