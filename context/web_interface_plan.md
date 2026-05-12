@@ -31,17 +31,22 @@ It should feel lightweight — not a full app framework.
 
 ## Authentication
 
-**Mechanism: Bearer token auth using the existing `API_KEY` env var.**
+**Two parallel auth mechanisms in a single middleware check.**
 
-The server already enforces `Authorization: Bearer <API_KEY>` on all
-non-health-check endpoints via `security_middleware` in `web/api_server.py`.
-No new server-side auth logic is needed.
+| Client type | Mechanism | Credential |
+|---|---|---|
+| Machine clients (Chatbox, scripts, Open WebUI) | `Authorization: Bearer <API_KEY>` | Single shared `API_KEY` env var |
+| Web UI users | `Authorization: Basic base64(user:pass)` | Per-user bcrypt hashes in `AUTH_USERS` env var |
+
+Either credential type grants access. Both can be enabled simultaneously.
+If neither is configured, the server runs open (local dev behaviour preserved).
 
 ### Server side (`web/api_server.py`)
 
-One small change only: extend the bypass in `security_middleware` to also
-allow unauthenticated access to `/ui/` paths, so the HTML shell loads in
-the browser before the user has entered a key:
+Two changes to `security_middleware`:
+
+**1. Extend the bypass to cover `/ui/` paths** so the HTML shell loads before
+the user has authenticated:
 
 ```python
 if (request.url.path == "/" and request.method == "GET") or \
@@ -49,47 +54,101 @@ if (request.url.path == "/" and request.method == "GET") or \
     return await call_next(request)
 ```
 
-The HTML page itself is harmless without a valid key — all API calls it
-makes will be rejected with 401 until the correct key is supplied.
+**2. Accept either Bearer or Basic auth:**
+
+```python
+if API_KEY or AUTH_USERS:
+    auth = request.headers.get("Authorization", "")
+    bearer_ok = bool(API_KEY and auth == f"Bearer {API_KEY}")
+    basic_ok = auth.lower().startswith("basic ") and \
+               await asyncio.to_thread(_verify_basic_auth, auth)
+    if not bearer_ok and not basic_ok:
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+```
+
+Add a sync helper (runs in thread pool because bcrypt is CPU-bound):
+
+```python
+import base64
+from passlib.hash import bcrypt as bcrypt_ctx
+
+def _verify_basic_auth(auth_header: str) -> bool:
+    try:
+        _, credentials = auth_header.split(" ", 1)
+        username, password = base64.b64decode(credentials).decode().split(":", 1)
+        stored = AUTH_USERS.get(username)
+        return bool(stored and bcrypt_ctx.verify(password, stored))
+    except Exception:
+        return False
+```
+
+### `settings.py`
+
+Parse `AUTH_USERS` at startup into a `dict[str, str]`:
+
+```python
+AUTH_USERS: dict[str, str] = {
+    u.strip(): h.strip()
+    for line in os.environ.get("AUTH_USERS", "").splitlines()
+    if ":" in (line := line.strip())
+    for u, h in [line.split(":", 1)]
+}
+```
 
 ### Client side (`web/index.html`)
 
-The UI stores the API key in `sessionStorage` after the user enters it and
-includes it as `Authorization: Bearer <key>` on every `fetch()` call. Flow:
+The login form has username and password fields. On submit the UI encodes
+`username:password` as base64 and stores the full `Authorization: Basic <value>`
+header in `localStorage`. All subsequent `fetch()` calls include it.
 
-1. On load, attempt `GET /v1/models` with any stored key.
-2. If the response is `401` (or no key is stored), show a login form with a
-   single API key field.
-3. On submit, store the key in `sessionStorage` and retry the request.
-4. If the retry succeeds, proceed to the chat UI.
-5. If any subsequent API call returns `401`, clear `sessionStorage` and show
-   the login form again (handles key rotation).
+Flow:
+1. On load, attempt `GET /v1/models` with any stored credential.
+2. If `401` (or nothing stored), show the login form.
+3. On submit, encode credentials, store in `localStorage`, retry.
+4. On success, show the chat UI.
+5. On any subsequent `401`, clear `localStorage` and re-show the form.
 
 ### Credential management
 
-The API key is the value of `API_KEY` in `.env`. No hashing, no user
-accounts. To rotate the key: update `.env` and run `docker compose up -d api`.
+Passwords must be hashed before adding to `AUTH_USERS`. Helper command:
 
-### No new dependencies
+```bash
+python -c "from passlib.hash import bcrypt; print(bcrypt.hash('yourpassword'))"
+```
 
-`passlib[bcrypt]` is **not** needed. Remove it from the plan.
+Set in `.env` (one `username:hash` per line):
+
+```
+AUTH_USERS=alice:$2b$12$...
+  bob:$2b$12$...
+```
+
+To revoke a user: remove their line from `AUTH_USERS` and run
+`docker compose up -d api`. The API key is unaffected.
+
+### New dependency
+
+Add `passlib[bcrypt]` to both `pyproject.toml` and the `Dockerfile` pip
+install block.
 
 ### Security note
 
-TLS is already in place via Caddy (`ai.spoonscloud.duckdns.org`). The API
-key is never transmitted in plaintext over the internet. For local network
-use (`http://localhost:8000/ui/`), the key transits in plaintext — acceptable
+TLS is already in place via Caddy (`ai.spoonscloud.duckdns.org`). Credentials
+never transit in plaintext over the internet. For local access
+(`http://localhost:8000/ui/`), Basic Auth transits in plaintext — acceptable
 on loopback.
 
 ## Files to Touch
 
 | File | Change |
 |------|--------|
-| `web/index.html` | New — full UI with API key login form and chat (HTML + embedded CSS + JS) |
-| `web/api_server.py` | Mount `StaticFiles` at `/ui`; extend `security_middleware` bypass to cover `/ui/` paths |
-| `settings.py` | No change — `API_KEY` already parsed |
-| `.env.example` | No change — `API_KEY` already documented |
-| `docker-compose.yml` | No change — `API_KEY` already passed through |
+| `web/index.html` | New — username/password login form and chat UI (HTML + embedded CSS + JS) |
+| `web/api_server.py` | Mount `StaticFiles` at `/ui`; extend `security_middleware` to accept Bearer or Basic; add `_verify_basic_auth` helper |
+| `settings.py` | Parse `AUTH_USERS` env var into `dict[str, str]` at startup |
+| `pyproject.toml` | Add `passlib[bcrypt]` dependency |
+| `Dockerfile` | Add `passlib[bcrypt]` to pip install block |
+| `.env.example` | Add `AUTH_USERS` example with placeholder hash and instructions |
+| `docker-compose.yml` | Pass `AUTH_USERS` env var through to the `api` service |
 
 ## UI Layout
 
@@ -210,8 +269,9 @@ auto-auth — they complement each other with no server-side changes required.
 2. The model dropdown lists whatever models are in Ollama
 3. Sending a question returns a streamed answer that renders as markdown
 4. Errors (timeout, pipeline failure) display inline in the chat
-5. No new containers, no build step, no new dependencies beyond `marked.js`
-6. With `API_KEY` set: unauthenticated requests to `/v1/*` return `401`
-7. With `API_KEY` set: the login form appears, the correct key grants access, wrong key re-prompts
-8. With `API_KEY` unset: the server runs without auth (existing local-only behavior preserved)
-9. `/ui/` paths load without a key so the login form is reachable in the browser
+5. No new containers, no build step, no new dependencies beyond `marked.js` (client) and `passlib[bcrypt]` (server)
+6. Machine clients using `Authorization: Bearer <API_KEY>` continue to work unchanged
+7. Web UI users can log in with username and password; invalid credentials re-prompt
+8. Revoking one user (removing from `AUTH_USERS`) does not affect the API key or other users
+9. With both `API_KEY` and `AUTH_USERS` unset: server runs open (local dev preserved)
+10. `/ui/` paths load without credentials so the login form is reachable in the browser
