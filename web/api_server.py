@@ -25,12 +25,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+import bcrypt as _bcrypt
 import jwt as pyjwt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 
 import api.ollama_client as ollama_client
@@ -51,7 +51,6 @@ _RATE_MAX = 30
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
 _rate_lock = asyncio.Lock()
 
-_bcrypt = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _WEB_DIR = Path(__file__).parent
 
 
@@ -347,7 +346,9 @@ async def login(credentials: LoginRequest) -> dict[str, str]:
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Web UI login not configured")
     stored = user_store.get_hash(credentials.username)
-    valid = stored and await asyncio.to_thread(_bcrypt.verify, credentials.password, stored)
+    valid = stored and await asyncio.to_thread(
+        _bcrypt.checkpw, credentials.password.encode(), stored.encode()
+    )
     if not valid:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     exp = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS)

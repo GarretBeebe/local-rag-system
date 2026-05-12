@@ -16,7 +16,7 @@ dependencies = [
     "requests",
     "fastapi",
     "uvicorn",
-    "passlib[bcrypt]",
+    "bcrypt",
     "PyJWT",
 ]
 

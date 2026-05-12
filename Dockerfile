@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir \
     requests \
     fastapi \
     uvicorn \
-    "passlib[bcrypt]" \
+    bcrypt \
     PyJWT
 
 COPY . .

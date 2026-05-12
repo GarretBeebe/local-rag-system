@@ -13,11 +13,9 @@ Via Docker:
 import getpass
 import sys
 
-from passlib.context import CryptContext
+import bcrypt
 
 from web.user_store import delete_user, init_db, list_users, upsert_user
-
-_bcrypt = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def cmd_add(username: str) -> None:
@@ -26,7 +24,8 @@ def cmd_add(username: str) -> None:
     if password != confirm:
         print("Passwords do not match.", file=sys.stderr)
         sys.exit(1)
-    upsert_user(username, _bcrypt.hash(password))
+    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    upsert_user(username, password_hash)
     print(f"User {username!r} saved.")
 
 
