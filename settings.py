@@ -31,8 +31,6 @@ MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 EMBED_MODEL = "nomic-embed-text"
 GEN_MODEL = "qwen2.5:14b"
-REASON_MODEL = "qwen2.5:14b"
-CODE_MODEL = "qwen2.5-coder:14b"
 RERANK_MODEL = "BAAI/bge-reranker-base"
 
 ALLOWED_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml"}

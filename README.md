@@ -177,12 +177,17 @@ The watcher monitors directories for documents to index. You need to:
 
 ## 3. Pull Ollama models
 
-Pull the required models on the host before starting the stack:
+The embedding model is required. Pull it before starting the stack:
 
     ollama pull nomic-embed-text
+
+Then pull whichever generation model(s) you want to use for chat and Q&A:
+
+    ollama pull qwen2.5:14b        # default GEN_MODEL
     ollama pull llama3.1:8b
-    ollama pull qwen2.5:14b
     ollama pull qwen2.5-coder:14b
+
+Any model available in Ollama can be selected per-request; see the [Models](#models) section.
 
 ## 4. Start the stack
 
@@ -216,23 +221,13 @@ Fingerprint data persists in `./data/` on the host.
 
 # Models
 
-Three Ollama models are configured in `settings.py`:
-
-| Variable | Model | Purpose |
-| --- | --- | --- |
-| `GEN_MODEL` | `qwen2.5:14b` | Default model for chat and Q&A |
-| `REASON_MODEL` | `qwen2.5:14b` | Reasoning and analysis |
-| `CODE_MODEL` | `qwen2.5-coder:14b` | Code-related queries |
-
-The API server honors the `model` field in every request — clients can
-select any model already pulled in Ollama without restarting the stack.
-`GEN_MODEL` is used only as the fallback when the `/v1/models` endpoint
-cannot reach Ollama.
-
-`GET /v1/models` returns the live list of models from Ollama so clients
-can discover what is available:
+Pull any models you want to use into Ollama — the API server exposes them
+all via `/v1/models` and clients can select freely per request.
 
     curl http://localhost:8000/v1/models
+
+`GEN_MODEL` in `settings.py` (default: `qwen2.5:14b`) is used only as a
+fallback when Ollama cannot be reached at startup.
 
 ------------------------------------------------------------------------
 

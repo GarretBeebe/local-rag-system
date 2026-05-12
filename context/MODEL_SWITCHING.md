@@ -8,9 +8,7 @@ Today the server ignores it and always uses `GEN_MODEL` from `settings.py`
 (`llama3.1:8b`), logging a warning when the names don't match.
 
 The goal is to honor the requested model name so clients can select
-between the models already configured in `settings.py` (`GEN_MODEL`,
-`REASON_MODEL`, `CODE_MODEL`) or any other model pulled in Ollama,
-without restarting the stack.
+any model pulled in Ollama, without restarting the stack.
 
 ---
 
