@@ -12,17 +12,23 @@ returns the top-ranked chunks ready to be passed to the LLM.
 
 import logging
 import math
+import re
 import time
 from contextlib import contextmanager
-from typing import Any
+from pathlib import Path
+from typing import Any, TypeAlias
 
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 from sentence_transformers import CrossEncoder
 
 from api.embed import embed
 from api.keyword_index import KeywordIndex
+from indexer.fingerprint_store import list_all_paths
 from settings import COLLECTION, MMR_ENABLED, RAG_TIMING, RERANK_MODEL, qdrant_client
 
 logger = logging.getLogger(__name__)
+
+Chunk: TypeAlias = dict[str, Any]
 
 
 @contextmanager
@@ -36,6 +42,18 @@ def timed(label: str):
 
 reranker = CrossEncoder(RERANK_MODEL, device="cpu")
 keyword_index = KeywordIndex()
+
+_FILENAME_RE = re.compile(r"\b([\w.-]+\.[a-zA-Z]{2,5})\b")
+
+
+def _extract_filename(question: str) -> str | None:
+    """Return a filename from the query if it matches a known indexed file, else None."""
+    match = _FILENAME_RE.search(question)
+    if not match:
+        return None
+    candidate = match.group(1)
+    known = {Path(p).name for p in list_all_paths()}
+    return candidate if candidate in known else None
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -52,12 +70,14 @@ def qdrant_recall(
     question_vec: list[float],
     limit: int = 15,
     with_vectors: bool = True,
-) -> list[dict[str, Any]]:
+    query_filter: Filter | None = None,
+) -> list[Chunk]:
     """Returns candidate chunks; fetches vectors only when needed for MMR."""
     with timed("qdrant_recall"):
         res = qdrant_client.query_points(
             collection_name=COLLECTION,
             query=question_vec,
+            query_filter=query_filter,
             limit=limit,
             with_payload=True,
             with_vectors=with_vectors,
@@ -71,10 +91,10 @@ def qdrant_recall(
 
 def mmr_select(
     question_vec: list[float],
-    candidates: list[dict[str, Any]],
+    candidates: list[Chunk],
     top_n: int = 8,
     lambda_mult: float = 0.7,
-) -> list[dict[str, Any]]:
+) -> list[Chunk]:
     """Select a diverse subset of candidates using Maximal Marginal Relevance.
 
     Only candidates that include a dense vector are considered; keyword-only
@@ -99,7 +119,7 @@ def mmr_select(
     return selected
 
 
-def rerank(question: str, candidates: list[dict[str, Any]], top_n: int = 4) -> list[dict[str, Any]]:
+def rerank(question: str, candidates: list[Chunk], top_n: int = 4) -> list[Chunk]:
     """Cross-encoder reranking: scores (question, chunk) pairs directly."""
     if not candidates:
         return []
@@ -118,10 +138,19 @@ def hybrid_recall(
     question: str,
     question_vec: list[float],
     limit: int = 15,
-) -> list[dict[str, Any]]:
+    filename: str | None = None,
+) -> list[Chunk]:
     """Combine dense vector recall from Qdrant with BM25 keyword search results."""
-    vector_results = qdrant_recall(question_vec, limit=limit, with_vectors=MMR_ENABLED)
+    query_filter = (
+        Filter(must=[FieldCondition(key="filename", match=MatchValue(value=filename))])
+        if filename else None
+    )
+    vector_results = qdrant_recall(question_vec, limit=limit,
+                                   with_vectors=MMR_ENABLED, query_filter=query_filter)
+
     keyword_results = keyword_index.search(question, limit=limit)
+    if filename:
+        keyword_results = [r for r in keyword_results if r["payload"].get("filename") == filename]
 
     keyword_candidates = [
         {"id": r["id"], "payload": r["payload"], "vector": None, "score": r["bm25_score"]}
@@ -136,19 +165,21 @@ def retrieve_best(
     recall_k: int = 15,
     mmr_k: int = 12,
     final_k: int = 4,
-) -> list[dict[str, Any]]:
+) -> list[Chunk]:
     """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
+    filename = _extract_filename(question)
+
     with timed("embed"):
         qvec = embed(question)
 
     with timed("hybrid_recall"):
-        candidates = hybrid_recall(question, qvec, limit=recall_k)
+        candidates = hybrid_recall(question, qvec, limit=recall_k, filename=filename)
 
     if not candidates:
         return []
 
     # Dedupe by point id — vector and keyword results can overlap.
-    seen: set = set()
+    seen: set[str] = set()
     deduped = []
     for c in candidates:
         if c["id"] not in seen:

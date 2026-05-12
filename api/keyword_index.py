@@ -41,7 +41,7 @@ class KeywordIndex:
                 with_payload=True,
             )
             for p in points:
-                docs.append(p.payload["text"].lower().split())
+                docs.append((p.payload.get("filename", "") + " " + p.payload["text"]).lower().split())
                 meta.append(p.payload)
                 ids.append(p.id)
             if next_offset is None:
