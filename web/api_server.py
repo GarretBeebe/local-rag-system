@@ -19,6 +19,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
+from collections.abc import Callable
 from typing import Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException
@@ -147,7 +148,7 @@ async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
     they arrive from Ollama — giving true time-to-first-token streaming.
     """
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
     request_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 
@@ -221,19 +222,18 @@ def _build_chat_response(answer: str, model: str) -> dict[str, Any]:
     return response
 
 
+def _model_entry(model_id: str) -> dict[str, Any]:
+    return {"id": model_id, "object": "model", "created": _SERVER_START, "owned_by": "ollama"}
+
+
 @app.get("/v1/models")
 def models():
     try:
         resp = ollama_client.get("/api/tags", timeout=5.0)
         resp.raise_for_status()
-        data = [
-            {"id": m["name"], "object": "model", "created": _SERVER_START, "owned_by": "ollama"}
-            for m in resp.json().get("models", [])
-        ]
+        data = [_model_entry(m["name"]) for m in resp.json().get("models", [])]
     except Exception:
-        data = [
-            {"id": GEN_MODEL, "object": "model", "created": _SERVER_START, "owned_by": "ollama"}
-        ]
+        data = [_model_entry(GEN_MODEL)]
     return {"object": "list", "data": data}
 
 
@@ -268,35 +268,20 @@ def root():
     return {"status": "rag-api running"}
 
 
-async def _warm_models():
+async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+    try:
+        await asyncio.to_thread(fn, *args, **kwargs)
+        logger.info("%s warmed", name)
+    except Exception as e:
+        logger.warning("%s warmup failed: %s", name, e)
+
+
+async def _warm_models() -> None:
     logger.info("Warming RAG models...")
-
-    async def warm_llm():
-        try:
-            await asyncio.to_thread(
-                ollama_client.post,
-                "/api/generate",
-                json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
-                timeout=60,
-            )
-            logger.info("LLM warmed")
-        except Exception as e:
-            logger.warning("LLM warmup failed: %s", e)
-
-    async def warm_embed():
-        try:
-            await asyncio.to_thread(embed, "warmup")
-            logger.info("Embedding model warmed")
-        except Exception as e:
-            logger.warning("Embedding warmup failed: %s", e)
-
-    async def warm_reranker():
-        try:
-            await asyncio.to_thread(rerank, "warmup", [{"payload": {"text": "warmup"}}])
-            logger.info("Reranker warmed")
-        except Exception as e:
-            logger.warning("Reranker warmup failed: %s", e)
-
-    await asyncio.gather(warm_llm(), warm_embed(), warm_reranker())
-
+    await asyncio.gather(
+        _warm_one("LLM", ollama_client.post, "/api/generate",
+                  json={"model": GEN_MODEL, "prompt": "warmup", "stream": False}, timeout=60),
+        _warm_one("Embedding model", embed, "warmup"),
+        _warm_one("Reranker", rerank, "warmup", [{"payload": {"text": "warmup"}}]),
+    )
     logger.info("All models warmed")

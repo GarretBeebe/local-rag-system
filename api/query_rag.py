@@ -74,7 +74,7 @@ def _format_sources(chunks: list[dict[str, Any]]) -> str:
         path = _resolve_source(p)
         score = c.get("rerank_score", 0)
         lines.append(f"[S{i}] {path} (rerank={score:.4f})")
-    return f"\n\n---\n\nSources:\n\n{chr(10).join(lines)}\n"
+    return f"\n\n---\n\nSources:\n\n{'\n'.join(lines)}\n"
 
 
 def ask(question: str, model: str) -> str:
