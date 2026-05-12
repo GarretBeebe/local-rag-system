@@ -20,7 +20,7 @@ def get(path: str, **kwargs: Any) -> requests.Response:
 
 
 def _generate_payload(model: str, prompt: str, *, stream: bool) -> dict[str, Any]:
-    return {"model": model, "prompt": prompt, "stream": stream, "options": {"num_ctx": 4096}}
+    return {"model": model, "prompt": prompt, "stream": stream, "options": {"num_ctx": 8192}}
 
 
 def generate(prompt: str, model: str, timeout: float = 120.0) -> str:

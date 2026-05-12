@@ -205,7 +205,15 @@ async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
             if item is None:
                 break
             if isinstance(item, Exception):
-                logger.exception("RAG stream error: %s", item)
+                logger.error("RAG stream error: %s", item)
+                error_chunk = {
+                    "id": request_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {"content": f"\n\n[Generation error: {item}]"}, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(error_chunk)}\n\n"
                 break
             chunk = {
                 "id": request_id,
@@ -217,6 +225,14 @@ async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
             yield f"data: {json.dumps(chunk)}\n\n"
     except asyncio.TimeoutError:
         logger.warning("RAG stream timed out waiting for next chunk")
+        timeout_chunk = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{"index": 0, "delta": {"content": "\n\n[Error: generation timed out]"}, "finish_reason": None}],
+        }
+        yield f"data: {json.dumps(timeout_chunk)}\n\n"
 
     done_chunk = {
         "id": request_id,
