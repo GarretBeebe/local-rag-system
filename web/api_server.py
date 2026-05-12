@@ -4,8 +4,8 @@ OpenAI-compatible chat completions endpoint backed by the local RAG pipeline.
 Implements POST /v1/chat/completions so OpenAI-compatible clients
 (Chatbox, Open WebUI, LangChain, etc.) can query the local knowledge base.
 
-The server always uses settings.GEN_MODEL regardless of the model name
-sent by the client.
+The server forwards the client's requested model to Ollama; any model
+already pulled in Ollama can be selected per-request.
 
 Run with:
 
@@ -99,7 +99,7 @@ def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
     return question
 
 
-async def _run_rag_with_timeout(question: str, timeout: float = 240.0) -> str:
+async def _run_rag_with_timeout(question: str, model: str, timeout: float = 240.0) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work.
 
     The semaphore counts in-flight executor tasks, not just requests waiting
@@ -115,7 +115,7 @@ async def _run_rag_with_timeout(question: str, timeout: float = 240.0) -> str:
     await _RAG_CONCURRENCY.acquire()
     future = None
     try:
-        future = loop.run_in_executor(_RAG_EXECUTOR, ask, question)
+        future = loop.run_in_executor(_RAG_EXECUTOR, ask, question, model)
         future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
 
         try:
@@ -139,7 +139,7 @@ async def _run_rag_with_timeout(question: str, timeout: float = 240.0) -> str:
     return str(answer or "").strip()
 
 
-async def _rag_stream_response(question: str) -> AsyncIterator[str]:
+async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
     """Bridge ask_stream_sync (sync generator) to an async SSE generator.
 
     Runs ask_stream_sync in the thread pool and forwards text chunks through
@@ -153,7 +153,7 @@ async def _rag_stream_response(question: str) -> AsyncIterator[str]:
 
     def _run():
         try:
-            for text in ask_stream_sync(question):
+            for text in ask_stream_sync(question, model):
                 loop.call_soon_threadsafe(queue.put_nowait, text)
         except Exception as exc:
             loop.call_soon_threadsafe(queue.put_nowait, exc)
@@ -176,7 +176,7 @@ async def _rag_stream_response(question: str) -> AsyncIterator[str]:
                 "id": request_id,
                 "object": "chat.completion.chunk",
                 "created": created,
-                "model": GEN_MODEL,
+                "model": model,
                 "choices": [{"index": 0, "delta": {"content": item}, "finish_reason": None}],
             }
             yield f"data: {json.dumps(chunk)}\n\n"
@@ -187,21 +187,21 @@ async def _rag_stream_response(question: str) -> AsyncIterator[str]:
         "id": request_id,
         "object": "chat.completion.chunk",
         "created": created,
-        "model": GEN_MODEL,
+        "model": model,
         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
     }
     yield f"data: {json.dumps(done_chunk)}\n\n"
     yield "data: [DONE]\n\n"
 
 
-def _build_chat_response(answer: str) -> dict[str, Any]:
+def _build_chat_response(answer: str, model: str) -> dict[str, Any]:
     """Build an OpenAI-compatible chat completion response object."""
     answer = answer or "No response generated."
     response = {
         "id": f"chatcmpl-{uuid.uuid4()}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": GEN_MODEL,
+        "model": model,
         "choices": [
             {
                 "index": 0,
@@ -223,17 +223,18 @@ def _build_chat_response(answer: str) -> dict[str, Any]:
 
 @app.get("/v1/models")
 def models():
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": GEN_MODEL,
-                "object": "model",
-                "created": _SERVER_START,
-                "owned_by": "local",
-            }
-        ],
-    }
+    try:
+        resp = ollama_client.get("/api/tags", timeout=5.0)
+        resp.raise_for_status()
+        data = [
+            {"id": m["name"], "object": "model", "created": _SERVER_START, "owned_by": "ollama"}
+            for m in resp.json().get("models", [])
+        ]
+    except Exception:
+        data = [
+            {"id": GEN_MODEL, "object": "model", "created": _SERVER_START, "owned_by": "ollama"}
+        ]
+    return {"object": "list", "data": data}
 
 
 @app.get("/models")
@@ -243,24 +244,18 @@ def models_alias():
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
-    if req.model != GEN_MODEL:
-        logger.warning(
-            "Client requested model %r but server uses %r",
-            req.model,
-            GEN_MODEL,
-        )
-
     question = _extract_question_from_messages(req.messages)
+    model = req.model
 
     if req.stream:
         return StreamingResponse(
-            _rag_stream_response(question),
+            _rag_stream_response(question, model),
             media_type="text/event-stream",
         )
 
-    answer = await _run_rag_with_timeout(question)
+    answer = await _run_rag_with_timeout(question, model)
     logger.info("Answer: %s", answer[:200])
-    return _build_chat_response(answer)
+    return _build_chat_response(answer, model)
 
 
 @app.post("/chat/completions")
