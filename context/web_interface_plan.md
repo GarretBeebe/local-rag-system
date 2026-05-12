@@ -33,58 +33,88 @@ It should feel lightweight — not a full app framework.
 
 **Two parallel auth mechanisms in a single middleware check.**
 
-| Client type | Mechanism | Credential |
+| Client type | Mechanism | Per-request cost |
 |---|---|---|
-| Machine clients (Chatbox, scripts, Open WebUI) | `Authorization: Bearer <API_KEY>` | Single shared `API_KEY` env var |
-| Web UI users | `Authorization: Basic base64(user:pass)` | Per-user bcrypt hashes in `AUTH_USERS` env var |
+| Machine clients (Chatbox, scripts, Open WebUI) | `Authorization: Bearer <API_KEY>` | String equality — microseconds |
+| Web UI users | `Authorization: Bearer <JWT>` | JWT signature verification — fast |
+
+Web UI users exchange their password for a JWT once at login. bcrypt runs
+**once per login session**, not once per request. Machine clients use the
+static API key unchanged.
 
 Either credential type grants access. Both can be enabled simultaneously.
 If neither is configured, the server runs open (local dev behaviour preserved).
 
+### Flow
+
+```
+Browser                          Server
+  │                                │
+  │  POST /auth/login              │
+  │  {username, password}  ──────► │  bcrypt.verify() — runs once
+  │                                │  jwt.encode({sub: username,
+  │  {token: <JWT>}        ◄──────  │              exp: now + 8h})
+  │                                │
+  │  store JWT in localStorage     │
+  │                                │
+  │  GET /v1/models                │
+  │  Authorization: Bearer <JWT> ► │  jwt.decode() — fast signature check
+  │  200 OK                ◄──────  │
+```
+
 ### Server side (`web/api_server.py`)
 
-Two changes to `security_middleware`:
-
-**1. Extend the bypass to cover `/ui/` paths** so the HTML shell loads before
-the user has authenticated:
+**Middleware bypass** — extend to cover `/ui/` and the login endpoint:
 
 ```python
-if (request.url.path == "/" and request.method == "GET") or \
-        request.url.path.startswith("/ui/"):
+BYPASS_PATHS = {"/", "/auth/login"}
+
+if request.url.path in BYPASS_PATHS or request.url.path.startswith("/ui/"):
     return await call_next(request)
 ```
 
-**2. Accept either Bearer or Basic auth:**
+**Bearer check** — API key exact match first, then JWT verification:
 
 ```python
-if API_KEY or AUTH_USERS:
-    auth = request.headers.get("Authorization", "")
-    bearer_ok = bool(API_KEY and auth == f"Bearer {API_KEY}")
-    basic_ok = auth.lower().startswith("basic ") and \
-               await asyncio.to_thread(_verify_basic_auth, auth)
-    if not bearer_ok and not basic_ok:
+if API_KEY or JWT_SECRET:
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not _is_valid_token(token):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 ```
 
-Add a sync helper (runs in thread pool because bcrypt is CPU-bound):
+```python
+import jwt as pyjwt
+
+def _is_valid_token(token: str) -> bool:
+    if API_KEY and token == API_KEY:
+        return True
+    if JWT_SECRET:
+        try:
+            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            return True
+        except pyjwt.InvalidTokenError:
+            return False
+    return False
+```
+
+**Login endpoint** (new — not covered by auth middleware):
 
 ```python
-import base64
-from passlib.hash import bcrypt as bcrypt_ctx
-
-def _verify_basic_auth(auth_header: str) -> bool:
-    try:
-        _, credentials = auth_header.split(" ", 1)
-        username, password = base64.b64decode(credentials).decode().split(":", 1)
-        stored = AUTH_USERS.get(username)
-        return bool(stored and bcrypt_ctx.verify(password, stored))
-    except Exception:
-        return False
+@app.post("/auth/login")
+async def login(credentials: LoginRequest) -> dict[str, str]:
+    stored = AUTH_USERS.get(credentials.username)
+    valid = stored and await asyncio.to_thread(bcrypt_ctx.verify, credentials.password, stored)
+    if not valid:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = pyjwt.encode(
+        {"sub": credentials.username, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRY_HOURS)},
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    return {"token": token}
 ```
 
 ### `settings.py`
-
-Parse `AUTH_USERS` at startup into a `dict[str, str]`:
 
 ```python
 AUTH_USERS: dict[str, str] = {
@@ -93,24 +123,24 @@ AUTH_USERS: dict[str, str] = {
     if ":" in (line := line.strip())
     for u, h in [line.split(":", 1)]
 }
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
 ```
 
 ### Client side (`web/index.html`)
 
-The login form has username and password fields. On submit the UI encodes
-`username:password` as base64 and stores the full `Authorization: Basic <value>`
-header in `localStorage`. All subsequent `fetch()` calls include it.
+Login form: username + password fields.
 
 Flow:
-1. On load, attempt `GET /v1/models` with any stored credential.
-2. If `401` (or nothing stored), show the login form.
-3. On submit, encode credentials, store in `localStorage`, retry.
+1. On load, check `localStorage` for a stored JWT; if present attempt `GET /v1/models`.
+2. If `401` or no JWT stored, show the login form.
+3. On submit, `POST /auth/login` with credentials; store returned JWT in `localStorage`.
 4. On success, show the chat UI.
-5. On any subsequent `401`, clear `localStorage` and re-show the form.
+5. On any subsequent `401` (expired or revoked token), clear `localStorage` and re-show the form.
 
 ### Credential management
 
-Passwords must be hashed before adding to `AUTH_USERS`. Helper command:
+Hash passwords before adding to `AUTH_USERS`:
 
 ```bash
 python -c "from passlib.hash import bcrypt; print(bcrypt.hash('yourpassword'))"
@@ -123,32 +153,40 @@ AUTH_USERS=alice:$2b$12$...
   bob:$2b$12$...
 ```
 
-To revoke a user: remove their line from `AUTH_USERS` and run
-`docker compose up -d api`. The API key is unaffected.
+Generate `JWT_SECRET`:
 
-### New dependency
+```bash
+openssl rand -hex 32
+```
 
-Add `passlib[bcrypt]` to both `pyproject.toml` and the `Dockerfile` pip
-install block.
+To revoke a user: remove their line from `AUTH_USERS` and restart the `api`
+container. Their current JWT will be rejected at next verification because
+`_is_valid_token` checks the username is still in `AUTH_USERS` after decode.
+The API key and other users are unaffected.
+
+### New dependencies
+
+Add to both `pyproject.toml` and the `Dockerfile` pip install block:
+- `passlib[bcrypt]`
+- `PyJWT`
 
 ### Security note
 
-TLS is already in place via Caddy (`ai.spoonscloud.duckdns.org`). Credentials
-never transit in plaintext over the internet. For local access
-(`http://localhost:8000/ui/`), Basic Auth transits in plaintext — acceptable
-on loopback.
+TLS is already in place via Caddy. Credentials and tokens never transit in
+plaintext over the internet. For local access (`http://localhost:8000/ui/`),
+traffic is on loopback — acceptable.
 
 ## Files to Touch
 
 | File | Change |
 |------|--------|
 | `web/index.html` | New — username/password login form and chat UI (HTML + embedded CSS + JS) |
-| `web/api_server.py` | Mount `StaticFiles` at `/ui`; extend `security_middleware` to accept Bearer or Basic; add `_verify_basic_auth` helper |
-| `settings.py` | Parse `AUTH_USERS` env var into `dict[str, str]` at startup |
-| `pyproject.toml` | Add `passlib[bcrypt]` dependency |
-| `Dockerfile` | Add `passlib[bcrypt]` to pip install block |
-| `.env.example` | Add `AUTH_USERS` example with placeholder hash and instructions |
-| `docker-compose.yml` | Pass `AUTH_USERS` env var through to the `api` service |
+| `web/api_server.py` | Mount `StaticFiles` at `/ui`; add `POST /auth/login` endpoint; extend `security_middleware` to accept API key or JWT Bearer; add `_is_valid_token` helper |
+| `settings.py` | Parse `AUTH_USERS`, `JWT_SECRET`, `JWT_EXPIRY_HOURS` env vars at startup |
+| `pyproject.toml` | Add `passlib[bcrypt]` and `PyJWT` dependencies |
+| `Dockerfile` | Add `passlib[bcrypt]` and `PyJWT` to pip install block |
+| `.env.example` | Add `AUTH_USERS`, `JWT_SECRET`, `JWT_EXPIRY_HOURS` with instructions |
+| `docker-compose.yml` | Pass `AUTH_USERS`, `JWT_SECRET`, `JWT_EXPIRY_HOURS` through to the `api` service |
 
 ## UI Layout
 
@@ -269,9 +307,11 @@ auto-auth — they complement each other with no server-side changes required.
 2. The model dropdown lists whatever models are in Ollama
 3. Sending a question returns a streamed answer that renders as markdown
 4. Errors (timeout, pipeline failure) display inline in the chat
-5. No new containers, no build step, no new dependencies beyond `marked.js` (client) and `passlib[bcrypt]` (server)
+5. No new containers, no build step, no new dependencies beyond `marked.js` (client) and `passlib[bcrypt]` + `PyJWT` (server)
 6. Machine clients using `Authorization: Bearer <API_KEY>` continue to work unchanged
-7. Web UI users can log in with username and password; invalid credentials re-prompt
-8. Revoking one user (removing from `AUTH_USERS`) does not affect the API key or other users
-9. With both `API_KEY` and `AUTH_USERS` unset: server runs open (local dev preserved)
-10. `/ui/` paths load without credentials so the login form is reachable in the browser
+7. Web UI users can log in with username and password; `POST /auth/login` returns a JWT; invalid credentials return 401
+8. JWT is stored in `localStorage` and sent as `Authorization: Bearer <jwt>` on subsequent requests — bcrypt runs once per session, not per request
+9. After JWT expiry (default 8h), the next request returns 401 and the login form reappears
+10. Revoking one user (removing from `AUTH_USERS`) does not affect the API key or other users
+11. With both `API_KEY` and `JWT_SECRET` unset: server runs open (local dev preserved)
+12. `/ui/` paths and `POST /auth/login` load without credentials so the login form is reachable
