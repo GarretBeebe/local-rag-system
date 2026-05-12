@@ -26,9 +26,6 @@ services:
     image: qdrant/qdrant:latest
     container_name: rag-qdrant
     restart: unless-stopped
-    ports:
-      - "6333:6333"
-      - "6334:6334"
     volumes:
       - qdrant-storage:/qdrant/storage
     environment:
@@ -56,6 +53,8 @@ services:
       RAG_MODE: ${RAG_MODE:-strict}
       RAG_TIMING: ${RAG_TIMING:-0}
       MMR_ENABLED: ${MMR_ENABLED:-true}
+      API_KEY: ${API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
@@ -86,8 +85,8 @@ services:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
       # Mount your document directories here. See note at top of file.
-      - ${NEXTCLOUD_PATH}:/watch/Nextcloud
-      - ${CODE_PATH}:/watch/Code
+      - ${NEXTCLOUD_PATH}:/watch/Nextcloud:ro
+      - ${CODE_PATH}:/watch/Code:ro
 
 volumes:
   qdrant-storage:

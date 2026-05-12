@@ -29,6 +29,8 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 RAG_MODE = os.environ.get("RAG_MODE", "strict")
 MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
+API_KEY = os.environ.get("API_KEY", "")
+CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",")]
 EMBED_MODEL = "nomic-embed-text"
 GEN_MODEL = "qwen2.5:14b"
 RERANK_MODEL = "BAAI/bge-reranker-base"

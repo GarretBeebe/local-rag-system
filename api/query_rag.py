@@ -15,6 +15,7 @@ Can be run directly as a script for interactive querying:
 
 import logging
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import api.ollama_client as ollama_client
@@ -34,7 +35,7 @@ def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
     context_blocks = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
-        source = _resolve_source(p)
+        source = Path(_resolve_source(p)).name
         chunk_ref = f"{p.get('chunk_index', '?')}/{p.get('chunk_total', '?')}"
         cite = f"[S{i}] {source} (chunk {chunk_ref})"
         context_blocks.append(f"{cite}\n{p['text']}")
@@ -71,7 +72,7 @@ def _format_sources(chunks: list[dict[str, Any]]) -> str:
     lines = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
-        path = _resolve_source(p)
+        path = Path(_resolve_source(p)).name
         score = c.get("rerank_score", 0)
         lines.append(f"[S{i}] {path} (rerank={score:.4f})")
     joined = "\n".join(lines)

@@ -17,27 +17,44 @@ import json
 import logging
 import time
 import uuid
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from collections.abc import Callable
 from typing import Any, AsyncIterator, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 import api.ollama_client as ollama_client
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import rerank
-from settings import GEN_MODEL
+from settings import API_KEY, CORS_ORIGINS, GEN_MODEL
 
 logger = logging.getLogger(__name__)
 
 _SERVER_START = int(time.time())
 _RAG_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 _RAG_CONCURRENCY = asyncio.Semaphore(4)
+
+_RATE_WINDOW = 60.0
+_RATE_MAX = 30
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+_rate_lock = asyncio.Lock()
+
+
+async def _check_rate_limit(ip: str) -> bool:
+    async with _rate_lock:
+        now = time.monotonic()
+        _rate_buckets[ip] = [t for t in _rate_buckets[ip] if now - t < _RATE_WINDOW]
+        if len(_rate_buckets[ip]) >= _RATE_MAX:
+            return False
+        _rate_buckets[ip].append(now)
+        return True
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,18 +70,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 @app.middleware("http")
-async def log_requests(request, call_next):
+async def security_middleware(request: Request, call_next):
     logger.info("%s %s", request.method, request.url.path)
+
+    # Health check bypasses auth and rate limiting so Docker healthcheck works
+    if request.url.path == "/" and request.method == "GET":
+        return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not await _check_rate_limit(client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+
+    if API_KEY:
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {API_KEY}":
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
     return await call_next(request)
+
+
+# Registered after security_middleware so CORS is the outermost layer —
+# this ensures CORS headers appear on 401/429 responses too.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
 
 class ChatMessage(BaseModel):
