@@ -253,31 +253,37 @@ fallback when Ollama cannot be reached at startup.
 
 # Query Modes
 
-The query behavior is controlled by the `RAG_MODE` environment variable,
-which defaults to `strict`.
-
 | Mode | Behavior |
 | --- | --- |
 | `strict` | Answers only from retrieved context. If no relevant chunks are found, returns a "no context found" message rather than guessing. |
-| `augmented` | Uses retrieved context when available and cites it. Supplements with the model's own knowledge when context is incomplete. Falls back to a direct model response if no context is found at all. |
+| `augmented` | Uses retrieved context when available and cites it. Supplements with the model's own knowledge where the context is incomplete. Falls back to a direct model response if no context is found at all. |
 
-Set the mode in your `.env` file:
+**Per-request switching (web UI):** The built-in chat UI has an
+Augmented / Strict dropdown in the header. Each request sends the
+selected mode — no restart required, and different conversations can
+use different modes simultaneously.
 
-    RAG_MODE=strict      # default — grounded answers with citations only
-    RAG_MODE=augmented   # allows model to fill gaps with its own knowledge
+**Per-request switching (API clients):** Pass `rag_mode` in the request body:
+
+    POST /v1/chat/completions
+    {"model": "...", "messages": [...], "rag_mode": "strict"}
+
+**Server-side default:** `RAG_MODE` in `.env` sets the fallback used
+when a request omits `rag_mode`. Defaults to `augmented`.
+
+    RAG_MODE=augmented   # default — model fills gaps with its own knowledge
+    RAG_MODE=strict      # grounded answers from indexed documents only
+
+Only `strict` and `augmented` are valid. The server refuses to start if
+`RAG_MODE` is set to any other value.
 
 **When to use each:**
 
-- **`strict`** is the safer default for a personal knowledge base. Every
-  answer traces back to an indexed document. The model will not invent
-  details.
-- **`augmented`** is useful when you want the model to remain helpful
-  even on questions your documents don't fully cover. Be aware that
-  answers may blend document content with the model's training data,
-  making citations less authoritative.
-
-The mode is forwarded into both the `api` and `watcher` containers via
-`docker-compose.yml`. Changing it requires restarting the stack.
+- **`augmented`** (default) is useful when you want the model to remain
+  helpful even on questions your documents don't fully cover. Answers
+  may blend document content with the model's training data.
+- **`strict`** ensures every answer traces back to an indexed document.
+  The model will not invent details not present in the context.
 
 ------------------------------------------------------------------------
 
