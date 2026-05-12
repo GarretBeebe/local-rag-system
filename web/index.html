@@ -247,6 +247,10 @@
       <h1>Local RAG</h1>
       <div class="header-right">
         <select id="model-select" title="Model"></select>
+        <select id="mode-select" title="RAG mode">
+          <option value="augmented">Augmented</option>
+          <option value="strict">Strict</option>
+        </select>
         <button id="logout-btn" class="secondary">Sign out</button>
       </div>
     </header>
@@ -269,6 +273,7 @@
     const inputEl     = $('input');
     const sendBtn     = $('send-btn');
     const modelSelect = $('model-select');
+    const modeSelect  = $('mode-select');
     const logoutBtn   = $('logout-btn');
 
     let TOKEN = localStorage.getItem('rag_token') || '';
@@ -391,6 +396,7 @@
             model: modelSelect.value,
             messages: [{ role: 'user', content: text }],
             stream: true,
+            rag_mode: modeSelect.value,
           }),
         });
 

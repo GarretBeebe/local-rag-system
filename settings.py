@@ -28,7 +28,9 @@ VECTOR_SIZE = 768
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # "strict"    — answer only from retrieved context; refuse if nothing found
 # "augmented" — use context when found, fall back to model knowledge otherwise
-RAG_MODE = os.environ.get("RAG_MODE", "strict")
+RAG_MODE = os.environ.get("RAG_MODE", "augmented")
+if RAG_MODE not in ("strict", "augmented"):
+    raise ValueError(f"settings: RAG_MODE must be 'strict' or 'augmented', got {RAG_MODE!r}")
 MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 API_KEY = os.environ.get("API_KEY", "")
