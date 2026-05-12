@@ -15,7 +15,9 @@ from pathlib import Path
 from qdrant_client import QdrantClient
 
 PROJECT_ROOT = Path(__file__).parent
-CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config" / "watcher_config.yaml")))
+CONFIG_PATH = Path(
+    os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config" / "watcher_config.yaml"))
+)
 DOCS_PATH = PROJECT_ROOT / "documents"
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "localhost")
@@ -30,6 +32,8 @@ RAG_MODE = os.environ.get("RAG_MODE", "strict")
 MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 API_KEY = os.environ.get("API_KEY", "")
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",")]
 EMBED_MODEL = "nomic-embed-text"
 GEN_MODEL = "qwen2.5:14b"

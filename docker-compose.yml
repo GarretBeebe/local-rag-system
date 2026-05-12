@@ -54,6 +54,8 @@ services:
       RAG_TIMING: ${RAG_TIMING:-0}
       MMR_ENABLED: ${MMR_ENABLED:-true}
       API_KEY: ${API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-8}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
     volumes:
       - rag-data:/app/data

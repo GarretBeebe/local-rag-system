@@ -17,7 +17,9 @@ RUN pip install --no-cache-dir \
     tqdm \
     requests \
     fastapi \
-    uvicorn
+    uvicorn \
+    "passlib[bcrypt]" \
+    PyJWT
 
 COPY . .
 RUN pip install --no-cache-dir -e . --no-deps

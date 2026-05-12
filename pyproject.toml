@@ -16,6 +16,8 @@ dependencies = [
     "requests",
     "fastapi",
     "uvicorn",
+    "passlib[bcrypt]",
+    "PyJWT",
 ]
 
 [tool.setuptools]
