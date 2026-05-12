@@ -37,7 +37,7 @@ import api.ollama_client as ollama_client
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import rerank
-from settings import API_KEY, CORS_ORIGINS, GEN_MODEL, JWT_EXPIRY_HOURS, JWT_SECRET
+from settings import API_KEY, CORS_ORIGINS, GEN_MODEL, JWT_EXPIRY_HOURS, JWT_SECRET, RAG_MODE
 from web import user_store
 
 logger = logging.getLogger(__name__)
@@ -138,6 +138,11 @@ class ChatRequest(BaseModel):
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool | None = False
+    rag_mode: Literal["strict", "augmented"] | None = None
+
+
+def _resolve_rag_mode(req: ChatRequest) -> Literal["strict", "augmented"]:
+    return req.rag_mode or RAG_MODE
 
 
 def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
@@ -162,7 +167,9 @@ def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
     return question
 
 
-async def _run_rag_with_timeout(question: str, model: str, timeout: float = 240.0) -> str:
+async def _run_rag_with_timeout(
+    question: str, model: str, rag_mode: str = "augmented", timeout: float = 240.0
+) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work.
 
     The semaphore counts in-flight executor tasks, not just requests waiting
@@ -178,7 +185,7 @@ async def _run_rag_with_timeout(question: str, model: str, timeout: float = 240.
     await _RAG_CONCURRENCY.acquire()
     future = None
     try:
-        future = loop.run_in_executor(_RAG_EXECUTOR, ask, question, model)
+        future = loop.run_in_executor(_RAG_EXECUTOR, ask, question, model, rag_mode)
         future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
 
         try:
@@ -202,7 +209,9 @@ async def _run_rag_with_timeout(question: str, model: str, timeout: float = 240.
     return str(answer or "").strip()
 
 
-async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
+async def _rag_stream_response(
+    question: str, model: str, rag_mode: str = "augmented"
+) -> AsyncIterator[str]:
     """Bridge ask_stream_sync (sync generator) to an async SSE generator.
 
     Runs ask_stream_sync in the thread pool and forwards text chunks through
@@ -216,7 +225,7 @@ async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
 
     def _run():
         try:
-            for text in ask_stream_sync(question, model):
+            for text in ask_stream_sync(question, model, rag_mode):
                 loop.call_soon_threadsafe(queue.put_nowait, text)
         except Exception as exc:
             loop.call_soon_threadsafe(queue.put_nowait, exc)
@@ -318,17 +327,17 @@ def models_alias():
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
     question = _extract_question_from_messages(req.messages)
-    model = req.model
+    rag_mode = _resolve_rag_mode(req)
 
     if req.stream:
         return StreamingResponse(
-            _rag_stream_response(question, model),
+            _rag_stream_response(question, req.model, rag_mode),
             media_type="text/event-stream",
         )
 
-    answer = await _run_rag_with_timeout(question, model)
+    answer = await _run_rag_with_timeout(question, req.model, rag_mode)
     logger.info("Answer: %s", answer[:200])
-    return _build_chat_response(answer, model)
+    return _build_chat_response(answer, req.model)
 
 
 @app.post("/chat/completions")

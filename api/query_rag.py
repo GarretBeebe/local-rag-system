@@ -20,7 +20,7 @@ from typing import Any
 
 import api.ollama_client as ollama_client
 from api.retrieval import retrieve_best, timed
-from settings import GEN_MODEL, RAG_MODE
+from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def _resolve_source(payload: dict[str, Any]) -> str:
     return Path(full).name
 
 
-def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
+def build_prompt(question: str, chunks: list[dict[str, Any]], rag_mode: str = "augmented") -> str:
     context_blocks = []
     for i, c in enumerate(chunks, start=1):
         p = c["payload"]
@@ -43,7 +43,7 @@ def build_prompt(question: str, chunks: list[dict[str, Any]]) -> str:
 
     context = "\n\n---\n\n".join(context_blocks)
 
-    if RAG_MODE == "augmented":
+    if rag_mode == "augmented":
         instructions = (
             "Use the context below to inform your answer where relevant. "
             "You may supplement with your own knowledge where the context is incomplete. "
@@ -80,15 +80,15 @@ def _format_sources(chunks: list[dict[str, Any]]) -> str:
     return f"\n\n---\n\nSources:\n\n{joined}\n"
 
 
-def ask(question: str, model: str) -> str:
+def ask(question: str, model: str, rag_mode: str = "augmented") -> str:
     chunks = retrieve_best(question)
 
     if not chunks:
-        if RAG_MODE == "augmented":
+        if rag_mode == "augmented":
             return ollama_client.generate(question, model).strip()
         return _NO_CONTEXT_REPLY
 
-    prompt = build_prompt(question, chunks)
+    prompt = build_prompt(question, chunks, rag_mode)
     with timed("generate"):
         answer = ollama_client.generate(prompt, model).strip()
 
@@ -98,18 +98,18 @@ def ask(question: str, model: str) -> str:
     return answer + _format_sources(chunks)
 
 
-def ask_stream_sync(question: str, model: str) -> Iterator[str]:
+def ask_stream_sync(question: str, model: str, rag_mode: str = "augmented") -> Iterator[str]:
     """Sync generator: retrieves context then streams generation chunks from Ollama."""
     chunks = retrieve_best(question)
 
     if not chunks:
-        if RAG_MODE == "augmented":
+        if rag_mode == "augmented":
             yield from ollama_client.stream_generate(question, model)
         else:
             yield _NO_CONTEXT_REPLY
         return
 
-    prompt = build_prompt(question, chunks)
+    prompt = build_prompt(question, chunks, rag_mode)
     with timed("stream_generate"):
         yield from ollama_client.stream_generate(prompt, model)
 
