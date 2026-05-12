@@ -4,7 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local RAG</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@18.0.3/marked.min.js"
+          integrity="sha384-OLBgp1GsljhM2TJ+sbHjaiH9txEUvgdDTAzHv2P24donTt6/529l+9Ua0vFImLlb"
+          crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.2/dist/purify.min.js"
+          integrity="sha384-AX0sZ/phUL4R6LAFP+mob0mJIWg2c3PX8wPn48ctytOl7XKfRQHbakBt5/QID7uh"
+          crossorigin="anonymous"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -358,7 +363,7 @@
       const div = document.createElement('div');
       div.className = `msg ${role}`;
       if (role === 'assistant') {
-        div.innerHTML = html;
+        div.innerHTML = DOMPurify.sanitize(html);
       } else {
         div.textContent = html; // plain text for user and error roles
       }
@@ -438,7 +443,7 @@
               thinking.remove();
               assistantDiv = appendMessage('assistant', marked.parse(accumulated));
             } else {
-              assistantDiv.innerHTML = marked.parse(accumulated);
+              assistantDiv.innerHTML = DOMPurify.sanitize(marked.parse(accumulated));
               messagesEl.scrollTop = messagesEl.scrollHeight;
             }
           }
