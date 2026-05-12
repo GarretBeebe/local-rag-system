@@ -112,10 +112,15 @@ The ingestion pipeline supports:
     │       └── docker-compose.yml   ← standalone Qdrant only
     │
     ├── data/
-    │   └── fingerprints.sqlite3
+    │   ├── fingerprints.sqlite3
+    │   └── users.sqlite3            ← web UI user credentials
     │
     ├── web/
-    │   └── api_server.py
+    │   ├── api_server.py
+    │   ├── user_store.py            ← SQLite-backed user store
+    │   └── index.html               ← built-in chat UI
+    │
+    ├── manage_users.py              ← CLI for adding/removing web UI users
     │
     ├── Dockerfile
     ├── docker-compose.yml           ← full stack (Qdrant + API + watcher)
@@ -177,6 +182,11 @@ When `API_KEY` is set, all endpoints except `GET /` require the header:
     Authorization: Bearer <your-key>
 
 Leave `API_KEY` empty (the default) to disable auth for purely local use.
+
+To enable the built-in web UI with username/password login, set a JWT signing secret:
+
+    JWT_SECRET=<generate with: openssl rand -hex 32>
+    JWT_EXPIRY_HOURS=8    # optional, default 8
 
 **c) Uncomment the volume mounts in `docker-compose.yml`** under the `watcher` service:
 
@@ -341,10 +351,56 @@ Endpoints
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/` | Health check |
+| `GET` | `/ui/` | Built-in web chat UI (no auth required to load) |
+| `POST` | `/auth/login` | Exchange username/password for a JWT |
 | `GET` | `/v1/models` | List available models |
 | `GET` | `/models` | Alias for `/v1/models` |
 | `POST` | `/v1/chat/completions` | RAG-backed chat completion (supports `"stream": true`) |
 | `POST` | `/chat/completions` | Alias for `/v1/chat/completions` |
+
+------------------------------------------------------------------------
+
+# Web UI
+
+A built-in chat interface is served at `/ui/` directly from the `rag-api`
+container. No extra container or build step required.
+
+## Setup
+
+**1. Add `JWT_SECRET` to `.env`** (required — login returns 503 without it):
+
+    JWT_SECRET=<output of: openssl rand -hex 32>
+
+**2. Recreate the api container** to pick up the new variable:
+
+    docker compose up -d api
+
+**3. Add users** via the management CLI:
+
+    docker exec -it rag-api python manage_users.py add <username>
+    # prompts for password, bcrypt-hashes it, writes to data/users.sqlite3
+
+Other commands:
+
+    docker exec -it rag-api python manage_users.py list
+    docker exec -it rag-api python manage_users.py remove <username>
+
+User changes take effect immediately — no container restart needed.
+Removing a user invalidates their active session on the next request.
+
+## Accessing the UI
+
+| Environment | URL |
+| --- | --- |
+| Local | `http://localhost:8000/ui/` |
+| Behind reverse proxy | `https://<your-domain>/ui/` |
+
+Log in with the username and password set via `manage_users.py`. The UI
+issues a JWT (default 8-hour expiry) stored in `localStorage`. When it
+expires the login form reappears automatically.
+
+Machine clients (`API_KEY` bearer token) are unaffected — both auth
+mechanisms work simultaneously.
 
 ------------------------------------------------------------------------
 
@@ -524,7 +580,8 @@ Runtime controls:
 
 | Control | Detail |
 | --- | --- |
-| API key auth | Set `API_KEY` in `.env`. All endpoints except `GET /` require `Authorization: Bearer <key>`. Disabled when `API_KEY` is empty. |
+| API key auth | Set `API_KEY` in `.env`. All endpoints except `GET /` and `/ui/*` require `Authorization: Bearer <key>`. Disabled when `API_KEY` is empty. |
+| Web UI auth | Set `JWT_SECRET` in `.env`. Browser users log in with username/password; server issues an 8-hour JWT. Credentials stored as bcrypt hashes in `data/users.sqlite3`. |
 | Rate limiting | 30 requests per minute per IP. Exceeding the limit returns `429`. |
 | CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins, defaults to `*`). |
 | Qdrant isolation | Qdrant is not bound to any host port — only reachable within the Docker network. |
@@ -545,7 +602,6 @@ Runtime controls:
 
 Possible improvements:
 
--   web interface
 -   multi‑agent workflows
 -   repository semantic graphs
 -   distributed indexing
