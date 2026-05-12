@@ -16,7 +16,7 @@ Can be run directly as a script for interactive querying:
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import api.ollama_client as ollama_client
 from api.retrieval import retrieve_best, timed
@@ -32,10 +32,14 @@ def _resolve_source(payload: dict[str, Any]) -> str:
     return Path(full).name
 
 
-def build_prompt(question: str, chunks: list[dict[str, Any]], rag_mode: str = "augmented") -> str:
+def build_prompt(
+    question: str,
+    chunks: list[dict[str, Any]],
+    rag_mode: Literal["strict", "augmented"] = "augmented",
+) -> str:
     context_blocks = []
-    for i, c in enumerate(chunks, start=1):
-        p = c["payload"]
+    for i, chunk in enumerate(chunks, start=1):
+        p = chunk["payload"]
         source = _resolve_source(p)
         chunk_ref = f"{p.get('chunk_index', '?')}/{p.get('chunk_total', '?')}"
         cite = f"[S{i}] {source} (chunk {chunk_ref})"
@@ -71,16 +75,16 @@ Answer:
 
 def _format_sources(chunks: list[dict[str, Any]]) -> str:
     lines = []
-    for i, c in enumerate(chunks, start=1):
-        p = c["payload"]
+    for i, chunk in enumerate(chunks, start=1):
+        p = chunk["payload"]
         path = _resolve_source(p)
-        score = c.get("rerank_score", 0)
+        score = chunk.get("rerank_score", 0)
         lines.append(f"[S{i}] {path} (rerank={score:.4f})")
     joined = "\n".join(lines)
     return f"\n\n---\n\nSources:\n\n{joined}\n"
 
 
-def ask(question: str, model: str, rag_mode: str = "augmented") -> str:
+def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented") -> str:
     chunks = retrieve_best(question)
 
     if not chunks:
@@ -98,7 +102,9 @@ def ask(question: str, model: str, rag_mode: str = "augmented") -> str:
     return answer + _format_sources(chunks)
 
 
-def ask_stream_sync(question: str, model: str, rag_mode: str = "augmented") -> Iterator[str]:
+def ask_stream_sync(
+    question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented"
+) -> Iterator[str]:
     """Sync generator: retrieves context then streams generation chunks from Ollama."""
     chunks = retrieve_best(question)
 

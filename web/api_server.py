@@ -168,7 +168,10 @@ def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
 
 
 async def _run_rag_with_timeout(
-    question: str, model: str, rag_mode: str = "augmented", timeout: float = 240.0
+    question: str,
+    model: str,
+    rag_mode: Literal["strict", "augmented"] = "augmented",
+    timeout: float = 240.0,
 ) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work.
 
@@ -210,7 +213,7 @@ async def _run_rag_with_timeout(
 
 
 async def _rag_stream_response(
-    question: str, model: str, rag_mode: str = "augmented"
+    question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented"
 ) -> AsyncIterator[str]:
     """Bridge ask_stream_sync (sync generator) to an async SSE generator.
 
