@@ -18,21 +18,27 @@ import logging
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
-from collections.abc import Callable
-from typing import Any, AsyncIterator, Literal
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Literal
 
+import bcrypt as _bcrypt
+import jwt as pyjwt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import api.ollama_client as ollama_client
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import rerank
-from settings import API_KEY, CORS_ORIGINS, GEN_MODEL
+from settings import API_KEY, CORS_ORIGINS, GEN_MODEL, JWT_EXPIRY_HOURS, JWT_SECRET
+from web import user_store
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,8 @@ _RATE_MAX = 30
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
 _rate_lock = asyncio.Lock()
 
+_WEB_DIR = Path(__file__).parent
+
 
 async def _check_rate_limit(ip: str) -> bool:
     async with _rate_lock:
@@ -56,8 +64,21 @@ async def _check_rate_limit(ip: str) -> bool:
         return True
 
 
+def _is_valid_token(token: str) -> bool:
+    if API_KEY and token == API_KEY:
+        return True
+    if JWT_SECRET:
+        try:
+            payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            return user_store.get_hash(payload.get("sub", "")) is not None
+        except pyjwt.InvalidTokenError:
+            return False
+    return False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    user_store.init_db()
     warm_task = asyncio.create_task(_warm_models())
     try:
         yield
@@ -69,23 +90,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
+app.mount("/ui", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
+
+_BYPASS_PATHS = {"/", "/auth/login"}
 
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next: Callable[..., Any]):
     logger.info("%s %s", request.method, request.url.path)
 
-    # Health check bypasses auth and rate limiting so Docker healthcheck works
-    if request.url.path == "/" and request.method == "GET":
+    if request.url.path in _BYPASS_PATHS or request.url.path.startswith("/ui"):
         return await call_next(request)
 
     client_ip = request.client.host if request.client else "unknown"
     if not await _check_rate_limit(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
-    if API_KEY:
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {API_KEY}":
+    if API_KEY or JWT_SECRET:
+        token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not _is_valid_token(token):
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
     return await call_next(request)
@@ -99,6 +122,11 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 
 class ChatMessage(BaseModel):
@@ -206,12 +234,16 @@ async def _rag_stream_response(question: str, model: str) -> AsyncIterator[str]:
                 break
             if isinstance(item, Exception):
                 logger.error("RAG stream error: %s", item)
-                yield _make_stream_chunk(request_id, created, model, content=f"\n\n[Generation error: {item}]")
+                yield _make_stream_chunk(
+                    request_id, created, model, content=f"\n\n[Generation error: {item}]"
+                )
                 break
             yield _make_stream_chunk(request_id, created, model, content=item)
     except asyncio.TimeoutError:
         logger.warning("RAG stream timed out waiting for next chunk")
-        yield _make_stream_chunk(request_id, created, model, content="\n\n[Error: generation timed out]")
+        yield _make_stream_chunk(
+            request_id, created, model, content="\n\n[Error: generation timed out]"
+        )
 
     yield _make_stream_chunk(request_id, created, model, finish_reason="stop")
     yield "data: [DONE]\n\n"
@@ -307,6 +339,23 @@ async def chat_alias(req: ChatRequest):
 @app.get("/")
 def root():
     return {"status": "rag-api running"}
+
+
+@app.post("/auth/login")
+async def login(credentials: LoginRequest) -> dict[str, str]:
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Web UI login not configured")
+    stored = user_store.get_hash(credentials.username)
+    if not stored:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    password_matches = await asyncio.to_thread(
+        _bcrypt.checkpw, credentials.password.encode(), stored.encode()
+    )
+    if not password_matches:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    exp = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS)
+    token = pyjwt.encode({"sub": credentials.username, "exp": exp}, JWT_SECRET, algorithm="HS256")
+    return {"token": token}
 
 
 async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:

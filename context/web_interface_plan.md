@@ -9,11 +9,12 @@ It should feel lightweight — not a full app framework.
 
 ## What Is Explicitly Out of Scope
 
-- Session management, JWTs, OAuth — Basic Auth is sufficient
 - Persistent chat history across page reloads
 - File upload / manual indexing via the UI (the watcher handles ingestion)
 - A separate container or build step
 - Any Node.js toolchain
+- Self-service registration or password reset (provisioning is admin-only via CLI)
+- RAG mode per-request switching (mode is server-side env var; omitted from v1)
 
 ## Recommended Approach
 
@@ -21,13 +22,16 @@ It should feel lightweight — not a full app framework.
 
 - No new service, no new Docker container, no build step.
 - FastAPI's `StaticFiles` mounts the `web/` directory at `/ui`; the root
-  redirect (`GET /`) stays as-is so the existing health check is unaffected.
+  endpoint (`GET /`) stays as-is so the existing health check is unaffected.
 - The page is plain HTML + vanilla JS. No framework. The interface is a chat
   window — it does not need React.
 - Streaming uses the browser's `fetch` + `ReadableStream` to consume the SSE
   chunks the server already emits. No polling, no WebSocket.
 - Markdown rendering uses `marked.js` loaded from a CDN (one `<script>` tag)
   so citations and code blocks in answers render cleanly without a build step.
+- The UI is fully responsive and works on both desktop and mobile browsers.
+  Layout uses CSS flexbox with `100dvh` (dynamic viewport height) so the
+  on-screen keyboard on iOS/Android does not break the input bar placement.
 
 ## Authentication
 
@@ -51,16 +55,34 @@ If neither is configured, the server runs open (local dev behaviour preserved).
 Browser                          Server
   │                                │
   │  POST /auth/login              │
-  │  {username, password}  ──────► │  bcrypt.verify() — runs once
+  │  {username, password}  ──────► │  bcrypt.verify() against DB hash — runs once
   │                                │  jwt.encode({sub: username,
   │  {token: <JWT>}        ◄──────  │              exp: now + 8h})
   │                                │
   │  store JWT in localStorage     │
   │                                │
   │  GET /v1/models                │
-  │  Authorization: Bearer <JWT> ► │  jwt.decode() — fast signature check
+  │  Authorization: Bearer <JWT> ► │  jwt.decode() + check username still in DB
   │  200 OK                ◄──────  │
 ```
+
+### User store (`data/user_store.py`)
+
+User credentials are stored in `data/users.sqlite3`, persisted via the existing
+`rag-data` Docker volume (already mounted at `/app/data` in the `api` container).
+The module follows the same pattern as `indexer/fingerprint_store.py`: stdlib
+`sqlite3`, thread-local connections, WAL mode.
+
+```
+users
+├── username  TEXT PRIMARY KEY
+├── password_hash  TEXT NOT NULL   ← bcrypt hash, never plaintext
+└── created_at  REAL NOT NULL
+```
+
+Functions: `init_db()`, `get_hash(username) -> str | None`,
+`upsert_user(username, password_hash)`, `delete_user(username)`,
+`list_users() -> list[str]`.
 
 ### Server side (`web/api_server.py`)
 
@@ -90,20 +112,23 @@ def _is_valid_token(token: str) -> bool:
         return True
     if JWT_SECRET:
         try:
-            pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-            return True
+            payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            return user_store.get_hash(payload.get("sub", "")) is not None
         except pyjwt.InvalidTokenError:
             return False
     return False
 ```
+
+Checking the username against the DB after decode means removing a user
+immediately revokes their JWT on the next request — no JWT blacklist needed.
 
 **Login endpoint** (new — not covered by auth middleware):
 
 ```python
 @app.post("/auth/login")
 async def login(credentials: LoginRequest) -> dict[str, str]:
-    stored = AUTH_USERS.get(credentials.username)
-    valid = stored and await asyncio.to_thread(bcrypt_ctx.verify, credentials.password, stored)
+    stored = user_store.get_hash(credentials.username)
+    valid = stored and await asyncio.to_thread(_bcrypt.verify, credentials.password, stored)
     if not valid:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = pyjwt.encode(
@@ -117,15 +142,11 @@ async def login(credentials: LoginRequest) -> dict[str, str]:
 ### `settings.py`
 
 ```python
-AUTH_USERS: dict[str, str] = {
-    u.strip(): h.strip()
-    for line in os.environ.get("AUTH_USERS", "").splitlines()
-    if ":" in (line := line.strip())
-    for u, h in [line.split(":", 1)]
-}
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
 ```
+
+No `AUTH_USERS` env var — credentials live in the DB only.
 
 ### Client side (`web/index.html`)
 
@@ -140,17 +161,18 @@ Flow:
 
 ### Credential management
 
-Hash passwords before adding to `AUTH_USERS`:
+Users are managed via `manage_users.py` at the repo root. Run it directly or
+through the running container — no restart needed.
 
 ```bash
-python -c "from passlib.hash import bcrypt; print(bcrypt.hash('yourpassword'))"
-```
+# Add a user (prompts for password, bcrypt-hashes it, writes to DB)
+docker exec -it rag-api python manage_users.py add alice
 
-Set in `.env` (one `username:hash` per line):
+# Remove a user (existing JWT invalidated on next request)
+docker exec -it rag-api python manage_users.py remove alice
 
-```
-AUTH_USERS=alice:$2b$12$...
-  bob:$2b$12$...
+# List all usernames
+docker exec -it rag-api python manage_users.py list
 ```
 
 Generate `JWT_SECRET`:
@@ -159,10 +181,16 @@ Generate `JWT_SECRET`:
 openssl rand -hex 32
 ```
 
-To revoke a user: remove their line from `AUTH_USERS` and restart the `api`
-container. Their current JWT will be rejected at next verification because
-`_is_valid_token` checks the username is still in `AUTH_USERS` after decode.
-The API key and other users are unaffected.
+Set in `.env`:
+
+```
+JWT_SECRET=<64-char hex string>
+JWT_EXPIRY_HOURS=8   # optional, default 8
+```
+
+**Password changes** do not automatically invalidate existing JWTs (the token
+only encodes the username). To force all sessions to re-authenticate, rotate
+`JWT_SECRET` and restart the `api` container.
 
 ### New dependencies
 
@@ -170,30 +198,37 @@ Add to both `pyproject.toml` and the `Dockerfile` pip install block:
 - `passlib[bcrypt]`
 - `PyJWT`
 
+`sqlite3` is stdlib — no new dependency.
+
 ### Security note
 
 TLS is already in place via Caddy. Credentials and tokens never transit in
 plaintext over the internet. For local access (`http://localhost:8000/ui/`),
 traffic is on loopback — acceptable.
 
+bcrypt hashes are stored only in `data/users.sqlite3` (a Docker-managed volume
+on the host filesystem), not in environment variables. This avoids hash exposure
+via `docker inspect` or process environment leakage.
+
 ## Files to Touch
 
 | File | Change |
 |------|--------|
+| `data/user_store.py` | New — SQLite-backed user store following `fingerprint_store.py` pattern |
+| `manage_users.py` | New — CLI for adding, removing, and listing users |
 | `web/index.html` | New — username/password login form and chat UI (HTML + embedded CSS + JS) |
-| `web/api_server.py` | Mount `StaticFiles` at `/ui`; add `POST /auth/login` endpoint; extend `security_middleware` to accept API key or JWT Bearer; add `_is_valid_token` helper |
-| `settings.py` | Parse `AUTH_USERS`, `JWT_SECRET`, `JWT_EXPIRY_HOURS` env vars at startup |
+| `web/api_server.py` | Mount `StaticFiles` at `/ui`; add `POST /auth/login`; extend `security_middleware` to accept API key or JWT; add `_is_valid_token` helper; call `user_store.init_db()` in lifespan |
+| `settings.py` | Add `JWT_SECRET`, `JWT_EXPIRY_HOURS` env vars |
 | `pyproject.toml` | Add `passlib[bcrypt]` and `PyJWT` dependencies |
 | `Dockerfile` | Add `passlib[bcrypt]` and `PyJWT` to pip install block |
-| `.env.example` | Add `AUTH_USERS`, `JWT_SECRET`, `JWT_EXPIRY_HOURS` with instructions |
-| `docker-compose.yml` | Pass `AUTH_USERS`, `JWT_SECRET`, `JWT_EXPIRY_HOURS` through to the `api` service |
+| `.env.example` | Add `JWT_SECRET`, `JWT_EXPIRY_HOURS` with instructions; document `manage_users.py` |
+| `docker-compose.yml` | Pass `JWT_SECRET`, `JWT_EXPIRY_HOURS` through to the `api` service |
 
 ## UI Layout
 
 ```
 ┌─────────────────────────────────────────────────┐
 │  Local RAG                    Model: [dropdown▼] │
-│                               Mode:  [dropdown▼] │
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │  [assistant message, markdown rendered]         │
@@ -208,13 +243,13 @@ traffic is on loopback — acceptable.
 ```
 
 - Model dropdown populated on load from `GET /v1/models`
-- Mode dropdown: `strict` / `augmented` (maps to `RAG_MODE` semantics, sent
-  as a system message or query parameter — see open question below)
 - Textarea submits on Enter (Shift+Enter for newline)
-- Assistant messages render markdown; user messages render as plain text
-- A spinner / "thinking…" state while the first token hasn't arrived yet
+- Assistant messages render markdown via `marked.js`; user messages render as plain text
+- A "thinking…" state while the first token hasn't arrived yet
+- Errors (timeout, pipeline failure) display inline in the message list
+- Fully responsive — works on desktop and mobile browsers
 
-## Alternative Considered and Rejected
+## Alternatives Considered and Rejected
 
 **Separate Next.js / React container** — adds a second service, a Node.js
 build step, volume mounts, and a new port to expose. The interface is a chat
@@ -224,86 +259,31 @@ window with a dropdown; none of that complexity is warranted.
 first-party UI is lighter and doesn't require the user to run a third-party
 container. The two can coexist since they hit the same API.
 
-## Auth UX Decisions (decide before implementing)
-
-### Session persistence: `sessionStorage` vs `localStorage`
-
-The plan currently stores the API key in `sessionStorage`, which clears when
-the tab closes. This means re-entering the key every session.
-
-**Option A — `sessionStorage` (current plan)**
-- Key is gone when the tab closes
-- Slightly more secure: no persistent credential in the browser
-- More friction: paste the key every session
-
-**Option B — `localStorage`**
-- Key persists until explicitly cleared or rotated
-- Enter once, works forever on that browser
-- Better UX for a single-user personal tool with no shared devices
-
-Recommendation: use `localStorage` — this is a personal single-user system,
-persistent login is the right default.
-
-### Auto-auth via `?key=` query parameter
-
-Support `https://ai.spoonscloud.duckdns.org/ui/?key=<api-key>` so the page
-can be bookmarked with the key embedded. On load:
-
-1. Read `?key=` from the URL if present
-2. Store it in `localStorage`
-3. Strip the param from the URL with `history.replaceState` (keeps the
-   address bar clean and prevents the key appearing in server logs or
-   browser history after the first load)
-4. Proceed directly to the chat UI — no login form shown
-
-**Trade-off:** the key appears in the browser history on the very first load
-before `replaceState` runs, and in any HTTP server logs if the request hits
-a logging proxy before Caddy. Acceptable for a personal tool; avoids the
-paste-on-every-device problem.
-
-Recommendation: implement both `localStorage` persistence and `?key=`
-auto-auth — they complement each other with no server-side changes required.
-
----
-
-## Open Questions
-
-1. **RAG mode per-request**: `RAG_MODE` is currently a server-side env var,
-   not a per-request field. The UI dropdown for mode either (a) has no effect
-   today and is informational only, (b) requires adding a `rag_mode` field to
-   `ChatRequest` and threading it through the pipeline, or (c) is omitted from
-   v1. Recommendation: omit it from v1 — shipping a working chat UI is the
-   goal; mode switching can follow.
-
-2. **Citation display**: The API embeds citations inline in the answer text as
-   markdown. `marked.js` will render them. No special parsing needed unless we
-   want to call them out visually (e.g., collapse into a "Sources" section).
-   Defer to v1 — render the full answer as markdown and revisit.
-
-3. **Error display**: The API returns 504 on timeout and 500 on pipeline error.
-   The UI should display these as an inline error message rather than silently
-   failing or logging to console only.
+**`AUTH_USERS` env var (bcrypt hashes in `.env`)** — appropriate for 1–3 users
+but awkward to manage at scale: multiline env var formatting is fragile,
+requires a container restart per change, and hashes are exposed via
+`docker inspect`. SQLite in the existing `rag-data` volume is cleaner for
+5+ users and requires no new infrastructure.
 
 ## Risks
 
-- **Health check**: `docker-compose.yml` hits `GET /` with `curl -f`. Returning
-  a redirect (302 → `/ui/`) still passes `curl -f`. Verified safe.
+- **Health check**: `docker-compose.yml` hits `GET /` with `curl -f`. The root
+  endpoint returns JSON directly (no redirect), so this is unaffected.
 - **CDN dependency**: `marked.js` loaded from a CDN means no internet = no
-  markdown rendering. Acceptable for a local-first tool; the text still
-  displays, just unstyled. Mitigation: vendor the script into `web/` if needed.
+  markdown rendering. Acceptable for a local-first tool; text still displays,
+  just unstyled. Mitigation: vendor the script into `web/` if needed.
 - **Streaming in older browsers**: `fetch` + `ReadableStream` works in all
   modern browsers. Not a concern for a local tool.
-- **API key in transit**: When accessed via `ai.spoonscloud.duckdns.org`,
-  the key transits over TLS (Caddy). When accessed via `localhost`, it
-  transits in plaintext — acceptable on loopback. No action needed.
-- **`sessionStorage` key storage**: The API key stored in `sessionStorage`
-  is cleared when the tab closes but is readable by any JS on the page.
-  Since there is no third-party JS (only the optional CDN script), the
-  attack surface is minimal. Vendoring `marked.js` eliminates it entirely.
+- **Credentials in transit**: When accessed via `ai.spoonscloud.duckdns.org`,
+  credentials transit over TLS (Caddy). When accessed via `localhost`, traffic
+  is on loopback — acceptable.
+- **JWT stored in localStorage**: Readable by JS on the page. Since there is
+  no third-party JS (only the optional CDN script), the attack surface is
+  minimal. Vendoring `marked.js` eliminates it entirely.
 
 ## Success Criteria
 
-1. Navigating to `http://localhost:8000/ui/` opens the chat page
+1. Navigating to `http://localhost:8000/ui/` opens the chat page without credentials
 2. The model dropdown lists whatever models are in Ollama
 3. Sending a question returns a streamed answer that renders as markdown
 4. Errors (timeout, pipeline failure) display inline in the chat
@@ -312,6 +292,6 @@ auto-auth — they complement each other with no server-side changes required.
 7. Web UI users can log in with username and password; `POST /auth/login` returns a JWT; invalid credentials return 401
 8. JWT is stored in `localStorage` and sent as `Authorization: Bearer <jwt>` on subsequent requests — bcrypt runs once per session, not per request
 9. After JWT expiry (default 8h), the next request returns 401 and the login form reappears
-10. Revoking one user (removing from `AUTH_USERS`) does not affect the API key or other users
+10. Revoking a user via `manage_users.py remove <username>` invalidates their JWT on the next request without restarting the container or affecting other users
 11. With both `API_KEY` and `JWT_SECRET` unset: server runs open (local dev preserved)
-12. `/ui/` paths and `POST /auth/login` load without credentials so the login form is reachable
+12. `manage_users.py add/remove/list` works correctly both on the host and via `docker exec`
