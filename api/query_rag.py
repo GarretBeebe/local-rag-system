@@ -19,7 +19,7 @@ from typing import Any
 
 import api.ollama_client as ollama_client
 from api.retrieval import retrieve_best, timed
-from settings import RAG_MODE
+from settings import GEN_MODEL, RAG_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -77,17 +77,17 @@ def _format_sources(chunks: list[dict[str, Any]]) -> str:
     return f"\n\n---\n\nSources:\n\n{chr(10).join(lines)}\n"
 
 
-def ask(question: str) -> str:
+def ask(question: str, model: str) -> str:
     chunks = retrieve_best(question)
 
     if not chunks:
         if RAG_MODE == "augmented":
-            return ollama_client.generate(question).strip()
+            return ollama_client.generate(question, model).strip()
         return _NO_CONTEXT_REPLY
 
     prompt = build_prompt(question, chunks)
     with timed("generate"):
-        answer = ollama_client.generate(prompt).strip()
+        answer = ollama_client.generate(prompt, model).strip()
 
     if "Answer:" in answer:
         answer = answer.split("Answer:", 1)[1].strip()
@@ -95,24 +95,24 @@ def ask(question: str) -> str:
     return answer + _format_sources(chunks)
 
 
-def ask_stream_sync(question: str) -> Iterator[str]:
+def ask_stream_sync(question: str, model: str) -> Iterator[str]:
     """Sync generator: retrieves context then streams generation chunks from Ollama."""
     chunks = retrieve_best(question)
 
     if not chunks:
         if RAG_MODE == "augmented":
-            yield from ollama_client.stream_generate(question)
+            yield from ollama_client.stream_generate(question, model)
         else:
             yield _NO_CONTEXT_REPLY
         return
 
     prompt = build_prompt(question, chunks)
     with timed("stream_generate"):
-        yield from ollama_client.stream_generate(prompt)
+        yield from ollama_client.stream_generate(prompt, model)
 
     yield _format_sources(chunks)
 
 
 if __name__ == "__main__":
     q = input("Ask a question: ").strip()
-    print(ask(q))
+    print(ask(q, GEN_MODEL))

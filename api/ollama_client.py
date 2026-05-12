@@ -5,7 +5,7 @@ from collections.abc import Iterator
 
 import requests
 
-from settings import GEN_MODEL, OLLAMA_BASE_URL
+from settings import OLLAMA_BASE_URL
 
 _session = requests.Session()
 
@@ -14,22 +14,26 @@ def post(path: str, **kwargs):
     return _session.post(f"{OLLAMA_BASE_URL}{path}", **kwargs)
 
 
-def generate(prompt: str, timeout: float = 120.0) -> str:
+def get(path: str, **kwargs):
+    return _session.get(f"{OLLAMA_BASE_URL}{path}", **kwargs)
+
+
+def generate(prompt: str, model: str, timeout: float = 120.0) -> str:
     """Return a complete generated response from Ollama."""
     r = post(
         "/api/generate",
-        json={"model": GEN_MODEL, "prompt": prompt, "stream": False, "options": {"num_ctx": 4096}},
+        json={"model": model, "prompt": prompt, "stream": False, "options": {"num_ctx": 4096}},
         timeout=timeout,
     )
     r.raise_for_status()
     return r.json()["response"]
 
 
-def stream_generate(prompt: str, timeout: float = 120.0) -> Iterator[str]:
+def stream_generate(prompt: str, model: str, timeout: float = 120.0) -> Iterator[str]:
     """Yield text chunks from Ollama's streaming generation API."""
     with post(
         "/api/generate",
-        json={"model": GEN_MODEL, "prompt": prompt, "stream": True, "options": {"num_ctx": 4096}},
+        json={"model": model, "prompt": prompt, "stream": True, "options": {"num_ctx": 4096}},
         stream=True,
         timeout=timeout,
     ) as resp:
