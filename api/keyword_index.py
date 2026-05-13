@@ -41,7 +41,8 @@ class KeywordIndex:
                 with_payload=True,
             )
             for p in points:
-                docs.append((p.payload.get("filename", "") + " " + p.payload["text"]).lower().split())
+                text = f"{p.payload.get('filename', '')} {p.payload['text']}"
+                docs.append(text.lower().split())
                 meta.append(p.payload)
                 ids.append(p.id)
             if next_offset is None:
@@ -67,6 +68,9 @@ class KeywordIndex:
             return []
         tokens = query.lower().split()
         scores = bm25.get_scores(tokens)
-        pairs = ((s, pid, m) for s, pid, m in zip(scores, ids, meta) if s > 0)
+        pairs = ((s, pid, m) for s, pid, m in zip(scores, ids, meta, strict=False) if s > 0)
         ranked = heapq.nlargest(limit, pairs, key=lambda x: x[0])
-        return [{"id": pid, "payload": payload, "bm25_score": score} for score, pid, payload in ranked]
+        return [
+            {"id": pid, "payload": payload, "bm25_score": score}
+            for score, pid, payload in ranked
+        ]

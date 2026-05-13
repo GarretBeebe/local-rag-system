@@ -13,10 +13,10 @@ Can be run directly as a script for interactive querying:
   python api/query_rag.py
 """
 
-from dataclasses import dataclass
 import logging
 import threading
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 

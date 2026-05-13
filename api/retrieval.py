@@ -58,7 +58,7 @@ def _extract_filename(question: str) -> str | None:
 
 def cosine(a: list[float], b: list[float]) -> float:
     """Returns the cosine similarity between two vectors, or 0.0 if either is zero-length."""
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0.0 or nb == 0.0:
@@ -128,7 +128,7 @@ def rerank(question: str, candidates: list[Chunk], top_n: int = 4) -> list[Chunk
         pairs = [(question, c["payload"]["text"]) for c in candidates]
         scores = reranker.predict(pairs)
 
-    for c, s in zip(candidates, scores):
+    for c, s in zip(candidates, scores, strict=False):
         c["rerank_score"] = float(s)
 
     return sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_n]

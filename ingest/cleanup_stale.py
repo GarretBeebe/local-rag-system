@@ -29,9 +29,10 @@ def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
     removed = 0
     for filepath in paths:
         p = Path(filepath)
-        if accessible_roots is not None:
-            if not any(p.is_relative_to(root) for root in accessible_roots):
-                continue
+        if accessible_roots is not None and not any(
+            p.is_relative_to(root) for root in accessible_roots
+        ):
+            continue
         if not p.exists():
             logging.info("Removing stale entry: %s", filepath)
             delete_document(filepath)

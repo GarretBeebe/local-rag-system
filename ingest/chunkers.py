@@ -21,7 +21,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from settings import MAX_CHUNK_CHARS, MAX_MD_CHUNK
 
-
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
     chunk_overlap=100,

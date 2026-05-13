@@ -595,13 +595,13 @@ Runtime controls:
 
 | Control | Detail |
 | --- | --- |
-| API key auth | Set `API_KEY` in `.env`. All endpoints except `GET /`, `/favicon.ico`, `/ui/*`, and `/auth/login` require `Authorization: Bearer <key>`. Compared with `hmac.compare_digest` (timing-safe). Disabled when `API_KEY` is empty. |
+| API key auth | Set `API_KEY` in `.env`. All endpoints except `GET /`, `/favicon.ico`, `/ui/*`, and `/auth/login` require `Authorization: Bearer <key>`. Compared with `hmac.compare_digest` (timing-safe). |
 | Web UI auth | Set `JWT_SECRET` in `.env`. Browser users log in with username/password; server issues an 8-hour JWT. Credentials stored as bcrypt hashes in `data/users.sqlite3`. Login returns 503 if `JWT_SECRET` is unset. |
-| Auth disabled warning | If both `API_KEY` and `JWT_SECRET` are unset, the server logs a `WARNING` at startup and runs fully open. Intentional for local dev only. |
+| Auth disabled local mode | If both `API_KEY` and `JWT_SECRET` are unset, startup fails unless `ALLOW_INSECURE_LOCALONLY=true` is set explicitly. Use only for local development. |
 | Rate limiting | 30 requests per minute per IP, applied to all endpoints including `/auth/login`. Returns `429` when exceeded. |
 | Security headers | All responses include `Content-Security-Policy`, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`. |
 | XSS protection | LLM output in the web UI is sanitised with DOMPurify before rendering as HTML. `marked.js` and `DOMPurify` are vendored — no CDN dependency. |
-| CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins, defaults to `*`). |
+| CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins). Empty by default, which disables cross-origin browser access. |
 | Qdrant isolation | Qdrant is not bound to any host port — only reachable within the Docker network. |
 | Read-only mounts | Watcher volume mounts use `:ro` — the container cannot write to your document directories. |
 
