@@ -14,6 +14,7 @@ Can be run directly as a script for interactive querying:
 """
 
 import logging
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Literal
@@ -103,21 +104,33 @@ def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "a
 
 
 def ask_stream_sync(
-    question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented"
+    question: str,
+    model: str,
+    rag_mode: Literal["strict", "augmented"] = "augmented",
+    cancel: threading.Event | None = None,
 ) -> Iterator[str]:
     """Sync generator: retrieves context then streams generation chunks from Ollama."""
+    if cancel and cancel.is_set():
+        return
+
     chunks = retrieve_best(question)
+
+    if cancel and cancel.is_set():
+        return
 
     if not chunks:
         if rag_mode == "augmented":
-            yield from ollama_client.stream_generate(question, model)
+            yield from ollama_client.stream_generate(question, model, cancel=cancel)
         else:
             yield _NO_CONTEXT_REPLY
         return
 
     prompt = build_prompt(question, chunks, rag_mode)
     with timed("stream_generate"):
-        yield from ollama_client.stream_generate(prompt, model)
+        yield from ollama_client.stream_generate(prompt, model, cancel=cancel)
+
+    if cancel and cancel.is_set():
+        return
 
     yield _format_sources(chunks)
 

@@ -1,6 +1,7 @@
 """Shared HTTP session for all Ollama API calls."""
 
 import json
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -30,7 +31,12 @@ def generate(prompt: str, model: str, timeout: float = 120.0) -> str:
     return r.json()["response"]
 
 
-def stream_generate(prompt: str, model: str, timeout: float = 120.0) -> Iterator[str]:
+def stream_generate(
+    prompt: str,
+    model: str,
+    timeout: float = 120.0,
+    cancel: threading.Event | None = None,
+) -> Iterator[str]:
     """Yield text chunks from Ollama's streaming generation API."""
     with post(
         "/api/generate",
@@ -40,6 +46,8 @@ def stream_generate(prompt: str, model: str, timeout: float = 120.0) -> Iterator
     ) as resp:
         resp.raise_for_status()
         for line in resp.iter_lines(decode_unicode=True):
+            if cancel and cancel.is_set():
+                break
             if not line:
                 continue
             data = json.loads(line)

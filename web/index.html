@@ -208,6 +208,9 @@
     button.primary:hover { background: #3a72c0; }
     button.primary:disabled { background: #252525; color: #555; cursor: not-allowed; }
     select:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.stop { background: #7a2020; color: #fff; border: none; border-radius: 8px;
+      padding: 0 1rem; height: 42px; font-size: 0.95rem; cursor: pointer; flex-shrink: 0; }
+    button.stop:hover { background: #962828; }
 
     button.secondary {
       background: transparent;
@@ -260,6 +263,7 @@
     <div class="input-bar">
       <textarea id="input" placeholder="Ask a question… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
       <button id="send-btn" class="primary">Send</button>
+      <button id="stop-btn" class="stop" style="display:none">Stop</button>
     </div>
   </div>
 
@@ -274,6 +278,8 @@
     const messagesEl  = $('messages');
     const inputEl     = $('input');
     const sendBtn     = $('send-btn');
+    const stopBtn     = $('stop-btn');
+    let _abortCtl     = null;
     const modelSelect = $('model-select');
     const modeSelect  = $('mode-select');
     const logoutBtn   = $('logout-btn');
@@ -378,8 +384,12 @@
       inputEl.value = '';
       inputEl.style.height = 'auto';
       sendBtn.disabled = true;
+      sendBtn.style.display = 'none';
+      stopBtn.style.display = '';
       modelSelect.disabled = true;
       modeSelect.disabled = true;
+      _abortCtl = new AbortController();
+      let wasStopped = false;
 
       appendMessage('user', text);
 
@@ -396,6 +406,7 @@
         const res = await apiFetch('/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: _abortCtl.signal,
           body: JSON.stringify({
             model: modelSelect.value,
             messages: [{ role: 'user', content: text }],
@@ -453,17 +464,34 @@
           appendMessage('error', 'No response received.');
         }
       } catch (err) {
-        thinking.remove();
-        appendMessage('error', `Request failed: ${err.message}`);
+        if (err.name === 'AbortError') {
+          wasStopped = true;
+          thinking.remove();
+          if (assistantDiv) {
+            const suffix = document.createElement('span');
+            suffix.style.cssText = 'color:#888;font-style:italic;font-size:0.82em;margin-left:0.4em;';
+            suffix.textContent = '[stopped]';
+            assistantDiv.appendChild(suffix);
+          } else {
+            appendMessage('error', '[stopped]');
+          }
+        } else {
+          thinking.remove();
+          appendMessage('error', `Request failed: ${err.message}`);
+        }
       } finally {
+        _abortCtl = null;
         sendBtn.disabled = false;
+        sendBtn.style.display = '';
+        stopBtn.style.display = 'none';
         modelSelect.disabled = false;
         modeSelect.disabled = false;
-        inputEl.focus();
+        if (!wasStopped) inputEl.focus();
       }
     }
 
     sendBtn.addEventListener('click', sendMessage);
+    stopBtn.addEventListener('click', () => { if (_abortCtl) _abortCtl.abort(); });
 
     inputEl.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) {

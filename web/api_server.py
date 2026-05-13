@@ -14,6 +14,7 @@ Run with:
 
 import asyncio
 import hmac
+import threading
 import json
 import logging
 import time
@@ -237,7 +238,10 @@ async def _run_rag_with_timeout(
 
 
 async def _rag_stream_response(
-    question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented"
+    question: str,
+    model: str,
+    rag_mode: Literal["strict", "augmented"] = "augmented",
+    http_request: Request | None = None,
 ) -> AsyncIterator[str]:
     """Bridge ask_stream_sync (sync generator) to an async SSE generator.
 
@@ -249,10 +253,11 @@ async def _rag_stream_response(
     queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
     request_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
+    cancel_event = threading.Event()
 
     def _run():
         try:
-            for text in ask_stream_sync(question, model, rag_mode):
+            for text in ask_stream_sync(question, model, rag_mode, cancel_event):
                 loop.call_soon_threadsafe(queue.put_nowait, text)
         except Exception as exc:
             loop.call_soon_threadsafe(queue.put_nowait, exc)
@@ -262,6 +267,18 @@ async def _rag_stream_response(
     await _RAG_CONCURRENCY.acquire()
     future = loop.run_in_executor(_RAG_EXECUTOR, _run)
     future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
+
+    async def _watch_disconnect():
+        if http_request is None:
+            return
+        while not cancel_event.is_set():
+            await asyncio.sleep(0.5)
+            if await http_request.is_disconnected():
+                cancel_event.set()
+                logger.info("Client disconnected — cancelling stream")
+                return
+
+    disconnect_task = asyncio.create_task(_watch_disconnect())
 
     try:
         while True:
@@ -276,10 +293,16 @@ async def _rag_stream_response(
                 break
             yield _make_stream_chunk(request_id, created, model, content=item)
     except asyncio.TimeoutError:
+        cancel_event.set()
         logger.warning("RAG stream timed out waiting for next chunk")
         yield _make_stream_chunk(
             request_id, created, model, content="\n\n[Error: generation timed out]"
         )
+    finally:
+        cancel_event.set()
+        disconnect_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await disconnect_task
 
     yield _make_stream_chunk(request_id, created, model, finish_reason="stop")
     yield "data: [DONE]\n\n"
@@ -352,13 +375,13 @@ def models_alias():
 
 
 @app.post("/v1/chat/completions")
-async def chat(req: ChatRequest):
+async def chat(request: Request, req: ChatRequest):
     question = _extract_question_from_messages(req.messages)
     rag_mode = _resolve_rag_mode(req)
 
     if req.stream:
         return StreamingResponse(
-            _rag_stream_response(question, req.model, rag_mode),
+            _rag_stream_response(question, req.model, rag_mode, request),
             media_type="text/event-stream",
         )
 
@@ -368,8 +391,8 @@ async def chat(req: ChatRequest):
 
 
 @app.post("/chat/completions")
-async def chat_alias(req: ChatRequest):
-    return await chat(req)
+async def chat_alias(request: Request, req: ChatRequest):
+    return await chat(request, req)
 
 
 @app.get("/")
