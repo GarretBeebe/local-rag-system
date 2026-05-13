@@ -5,26 +5,19 @@ Tracks which files have been indexed and their content hashes so the watcher
 can skip files that haven't changed since last indexing.
 """
 
-import sqlite3
-import threading
 from pathlib import Path
 
 from common.paths import normalize_path
-from common.sqlite_store import get_thread_local_connection
+from common.sqlite_store import SqliteStore
 
 DB_PATH = Path(__file__).parent.parent / "data" / "fingerprints.sqlite3"
 
-_local = threading.local()
-
-
-def _get_conn() -> sqlite3.Connection:
-    """Get a thread-local SQLite connection, initializing it on first use."""
-    return get_thread_local_connection(DB_PATH, _local)
+_store = SqliteStore(DB_PATH)
 
 
 def init_db() -> None:
     """Initialize the fingerprints table if it does not already exist."""
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS fingerprints(
@@ -37,7 +30,7 @@ def init_db() -> None:
 
 def get_hash(filepath: str) -> str | None:
     """Return the stored SHA-256 hash for filepath, or None if unknown."""
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         row = conn.execute(
             "SELECT sha256 FROM fingerprints WHERE filepath=?",
@@ -48,7 +41,7 @@ def get_hash(filepath: str) -> str | None:
 
 def upsert_hash(filepath: str, sha256: str) -> None:
     """Insert or update the SHA-256 hash for filepath."""
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         conn.execute(
             """
@@ -63,7 +56,7 @@ def upsert_hash(filepath: str, sha256: str) -> None:
 
 def delete_hash(filepath: str) -> None:
     """Delete any stored hash entry for filepath."""
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         conn.execute(
             "DELETE FROM fingerprints WHERE filepath=?",
@@ -73,7 +66,7 @@ def delete_hash(filepath: str) -> None:
 
 def list_all_paths() -> list[str]:
     """Return all filepaths currently tracked in the fingerprint store."""
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         rows = conn.execute("SELECT filepath FROM fingerprints").fetchall()
     return [row[0] for row in rows]

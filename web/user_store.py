@@ -5,23 +5,17 @@ Stores bcrypt password hashes keyed by username in data/users.sqlite3,
 which is persisted via the rag-data Docker volume.
 """
 
-import sqlite3
-import threading
 from pathlib import Path
 
-from common.sqlite_store import get_thread_local_connection
+from common.sqlite_store import SqliteStore
 
 DB_PATH = Path(__file__).parent.parent / "data" / "users.sqlite3"
 
-_local = threading.local()
-
-
-def _get_conn() -> sqlite3.Connection:
-    return get_thread_local_connection(DB_PATH, _local)
+_store = SqliteStore(DB_PATH)
 
 
 def init_db() -> None:
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -33,7 +27,7 @@ def init_db() -> None:
 
 
 def get_hash(username: str) -> str | None:
-    conn = _get_conn()
+    conn = _store.conn
     row = conn.execute(
         "SELECT password_hash FROM users WHERE username=?", (username,)
     ).fetchone()
@@ -41,7 +35,7 @@ def get_hash(username: str) -> str | None:
 
 
 def upsert_user(username: str, password_hash: str) -> None:
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         conn.execute(
             """
@@ -56,12 +50,12 @@ def upsert_user(username: str, password_hash: str) -> None:
 
 
 def delete_user(username: str) -> None:
-    conn = _get_conn()
+    conn = _store.conn
     with conn:
         conn.execute("DELETE FROM users WHERE username=?", (username,))
 
 
 def list_users() -> list[str]:
-    conn = _get_conn()
+    conn = _store.conn
     rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
     return [row[0] for row in rows]

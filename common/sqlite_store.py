@@ -16,3 +16,15 @@ def get_thread_local_connection(db_path: Path, local_state: threading.local) -> 
         conn.execute("PRAGMA synchronous=NORMAL")
         local_state.conn = conn
     return local_state.conn
+
+
+class SqliteStore:
+    """Owns a thread-local SQLite connection for a single database file."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+        self._local = threading.local()
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        return get_thread_local_connection(self._db_path, self._local)
