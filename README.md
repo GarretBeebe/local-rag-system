@@ -326,7 +326,9 @@ new and modified files on all platforms, including WSL2-mounted Windows
 paths (`/mnt/c/...`) where kernel inotify events are not delivered.
 
 The watcher reads `config/watcher_config.container.yaml`, set via the
-`CONFIG_PATH` environment variable in `docker-compose.yml`.
+`CONFIG_PATH` environment variable in `docker-compose.yml`. Paths use the
+`/watch` prefix because host directories are bind-mounted into the container
+under `/watch` (e.g. `${NEXTCLOUD_PATH}:/watch/Nextcloud:ro`).
 
 Example container config:
 
