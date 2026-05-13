@@ -16,7 +16,7 @@ from qdrant_client import QdrantClient
 
 PROJECT_ROOT = Path(__file__).parent
 CONFIG_PATH = Path(
-    os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config" / "watcher_config.yaml"))
+    os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config" / "watcher_config.container.yaml"))
 )
 DOCS_PATH = PROJECT_ROOT / "documents"
 

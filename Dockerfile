@@ -7,22 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir \
-    qdrant-client \
-    sentence-transformers \
-    rank-bm25 \
-    langchain-text-splitters \
-    watchdog \
-    pyyaml \
-    tqdm \
-    requests \
-    fastapi \
-    uvicorn \
-    bcrypt \
-    PyJWT
-
 COPY . .
-RUN pip install --no-cache-dir -e . --no-deps
+RUN pip install --no-cache-dir -e .
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

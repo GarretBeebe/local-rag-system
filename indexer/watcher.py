@@ -6,8 +6,7 @@ keeps watching for file system events. File changes are deduplicated by
 SHA-256 hash before being passed to the ingest pipeline.
 
 Watch paths, allowed extensions, and ignore patterns are configured in
-config/watcher_config.yaml. Run from the project root:
-  python indexer/watcher.py
+config/watcher_config.container.yaml (set via CONFIG_PATH env var).
 """
 
 import hashlib

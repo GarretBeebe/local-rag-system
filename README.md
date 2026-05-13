@@ -111,7 +111,6 @@ The ingestion pipeline supports:
     │   └── sqlite_store.py      ← shared SQLite connection helper
     │
     ├── config/
-    │   ├── watcher_config.yaml           ← bare-metal install paths (~/…)
     │   └── watcher_config.container.yaml ← Docker paths (/watch/…)
     │
     ├── data/
@@ -128,7 +127,6 @@ The ingestion pipeline supports:
     ├── Dockerfile
     ├── docker-compose.yml           ← full stack (Qdrant + API + watcher)
     ├── .dockerignore
-    ├── install.sh
     ├── settings.py
     └── README.md
 
@@ -327,13 +325,8 @@ filesystem on a 30-second interval. This ensures reliable detection of
 new and modified files on all platforms, including WSL2-mounted Windows
 paths (`/mnt/c/...`) where kernel inotify events are not delivered.
 
-There are two config files:
-
-- `config/watcher_config.yaml` — for bare-metal installs; uses `~/` paths
-- `config/watcher_config.container.yaml` — for Docker; uses `/watch/` paths
-
-The Docker watcher reads `watcher_config.container.yaml` via the
-`CONFIG_PATH` environment variable set in `docker-compose.yml`.
+The watcher reads `config/watcher_config.container.yaml`, set via the
+`CONFIG_PATH` environment variable in `docker-compose.yml`.
 
 Example container config:
 
@@ -584,8 +577,7 @@ Examples:
 
 Modify
 
-    config/watcher_config.container.yaml   # Docker
-    config/watcher_config.yaml             # bare-metal
+    config/watcher_config.container.yaml
 
 Example:
 
