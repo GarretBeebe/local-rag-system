@@ -207,6 +207,7 @@
     }
     button.primary:hover { background: #3a72c0; }
     button.primary:disabled { background: #252525; color: #555; cursor: not-allowed; }
+    select:disabled { opacity: 0.4; cursor: not-allowed; }
 
     button.secondary {
       background: transparent;
@@ -377,6 +378,8 @@
       inputEl.value = '';
       inputEl.style.height = 'auto';
       sendBtn.disabled = true;
+      modelSelect.disabled = true;
+      modeSelect.disabled = true;
 
       appendMessage('user', text);
 
@@ -454,6 +457,8 @@
         appendMessage('error', `Request failed: ${err.message}`);
       } finally {
         sendBtn.disabled = false;
+        modelSelect.disabled = false;
+        modeSelect.disabled = false;
         inputEl.focus();
       }
     }
