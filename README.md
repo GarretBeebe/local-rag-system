@@ -90,6 +90,7 @@ The ingestion pipeline supports:
 
     rag-system/
     ├── api/
+    │   ├── embed.py             ← shared embedding helper (ingest + retrieval)
     │   ├── ollama_client.py     ← shared Ollama HTTP session
     │   ├── query_rag.py
     │   ├── retrieval.py
@@ -97,19 +98,21 @@ The ingestion pipeline supports:
     │
     ├── ingest/
     │   ├── chunkers.py
+    │   ├── cleanup_stale.py
     │   ├── index_documents.py
-    │   ├── reset_collection.py
+    │   └── reset_collection.py
     │
     ├── indexer/
     │   ├── watcher.py
     │   └── fingerprint_store.py
     │
-    ├── config/
-    │   └── watcher_config.yaml
+    ├── common/
+    │   ├── paths.py             ← shared path/filter helpers
+    │   └── sqlite_store.py      ← shared SQLite connection helper
     │
-    ├── vector-db/
-    │   └── qdrant/
-    │       └── docker-compose.yml   ← standalone Qdrant only
+    ├── config/
+    │   ├── watcher_config.yaml           ← bare-metal install paths (~/…)
+    │   └── watcher_config.container.yaml ← Docker paths (/watch/…)
     │
     ├── data/
     │   ├── fingerprints.sqlite3
@@ -155,12 +158,13 @@ starting the stack. Works on Windows, macOS, and Linux.
 
 The watcher monitors directories for documents to index. You need to:
 
-**a) Update `config/watcher_config.yaml`** to use container-side mount paths:
+**a) Update `config/watcher_config.container.yaml`** to list the paths
+you want indexed. Use the container-side mount paths (`/watch/…`):
 
     watch_paths:
-      - path: /mnt/nextcloud
+      - path: /watch/Nextcloud
         recursive: true
-      - path: /mnt/code
+      - path: /watch/Code
         recursive: true
 
 **b) Copy `.env.example` to `.env`** and set your host paths:
@@ -195,14 +199,7 @@ different origin:
 
     CORS_ORIGINS=https://chat.example.com,https://app.example.com
 
-**c) Uncomment the volume mounts in `docker-compose.yml`** under the `watcher` service:
-
-    volumes:
-      - ./data:/app/data
-      - ${NEXTCLOUD_PATH}:/mnt/nextcloud
-      - ${CODE_PATH}:/mnt/code
-
-## 3. Pull Ollama models
+## 2. Pull Ollama models
 
 The embedding model is required. Pull it before starting the stack:
 
@@ -216,13 +213,13 @@ Then pull whichever generation model(s) you want to use for chat and Q&A:
 
 Any model available in Ollama can be selected per-request; see the [Models](#models) section.
 
-## 4. Start the stack
+## 3. Start the stack
 
     docker compose up -d
 
 This starts three containers: `rag-qdrant`, `rag-api`, and `rag-watcher`.
 
-## 5. Verify
+## 4. Verify
 
     docker compose ps
 
@@ -241,8 +238,7 @@ Expected: `{"status":"rag-api running"}`
 
     docker compose down
 
-Vector database data persists in the `qdrant-storage` Docker named volume.
-Fingerprint data persists in `./data/` on the host.
+All data persists in Docker named volumes (`qdrant-storage`, `rag-data`, `hf-cache`).
 
 ------------------------------------------------------------------------
 
@@ -327,30 +323,44 @@ Reset collection
 # Filesystem Watcher
 
 The watcher uses `watchdog`'s `PollingObserver`, which polls the
-filesystem on a one-second interval. This ensures reliable detection of
+filesystem on a 30-second interval. This ensures reliable detection of
 new and modified files on all platforms, including WSL2-mounted Windows
 paths (`/mnt/c/...`) where kernel inotify events are not delivered.
 
-Configuration file
+There are two config files:
 
-    config/watcher_config.yaml
+- `config/watcher_config.yaml` — for bare-metal installs; uses `~/` paths
+- `config/watcher_config.container.yaml` — for Docker; uses `/watch/` paths
 
-Use container-side mount paths in `watcher_config.yaml` (matching the volume mounts in `docker-compose.yml`):
+The Docker watcher reads `watcher_config.container.yaml` via the
+`CONFIG_PATH` environment variable set in `docker-compose.yml`.
+
+Example container config:
 
     watch_paths:
-      - path: /mnt/nextcloud
+      - path: /watch/Nextcloud
         recursive: true
-      - path: /mnt/code
+      - path: /watch/Code
         recursive: true
 
     allowed_extensions:
       - .md
       - .txt
       - .py
+      - .yaml
+      - .yml
+      - .json
+      - .toml
+      - .js
+      - .ts
+      - .go
+      - .rs
+      # see watcher_config.container.yaml for the full list
 
     ignore_patterns:
       - .git
       - node_modules
+      - __pycache__
 
 ------------------------------------------------------------------------
 
@@ -574,12 +584,14 @@ Examples:
 
 Modify
 
-    config/watcher_config.yaml
+    config/watcher_config.container.yaml   # Docker
+    config/watcher_config.yaml             # bare-metal
 
 Example:
 
     watch_paths:
-      - path: ~/Research
+      - path: /watch/Research
+        recursive: true
 
 ------------------------------------------------------------------------
 
