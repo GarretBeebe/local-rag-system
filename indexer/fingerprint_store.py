@@ -9,34 +9,21 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from common.paths import normalize_path
+from common.sqlite_store import get_thread_local_connection
+
 DB_PATH = Path(__file__).parent.parent / "data" / "fingerprints.sqlite3"
 
 _local = threading.local()
 
 
-def _normalize(filepath: str) -> str:
-    """Return a normalized absolute path for consistent storage in the database."""
-    return str(Path(filepath).resolve())
-
-
 def _get_conn() -> sqlite3.Connection:
     """Get a thread-local SQLite connection, initializing it on first use."""
-    if not hasattr(_local, "conn"):
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-        except sqlite3.OperationalError:
-            pass
-        conn.execute("PRAGMA synchronous=NORMAL")
-        _local.conn = conn
-
-    return _local.conn
+    return get_thread_local_connection(DB_PATH, _local)
 
 
 def init_db() -> None:
     """Initialize the fingerprints table if it does not already exist."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = _get_conn()
     with conn:
         conn.execute("""
@@ -54,7 +41,7 @@ def get_hash(filepath: str) -> str | None:
     with conn:
         row = conn.execute(
             "SELECT sha256 FROM fingerprints WHERE filepath=?",
-            (_normalize(filepath),),
+            (normalize_path(filepath),),
         ).fetchone()
     return row[0] if row else None
 
@@ -70,7 +57,7 @@ def upsert_hash(filepath: str, sha256: str) -> None:
             ON CONFLICT(filepath)
             DO UPDATE SET sha256=excluded.sha256, updated_at=strftime('%s','now')
             """,
-            (_normalize(filepath), sha256),
+            (normalize_path(filepath), sha256),
         )
 
 
@@ -80,7 +67,7 @@ def delete_hash(filepath: str) -> None:
     with conn:
         conn.execute(
             "DELETE FROM fingerprints WHERE filepath=?",
-            (_normalize(filepath),),
+            (normalize_path(filepath),),
         )
 
 

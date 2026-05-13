@@ -13,6 +13,7 @@ Can be run directly as a script for interactive querying:
   python api/query_rag.py
 """
 
+from dataclasses import dataclass
 import logging
 import threading
 from collections.abc import Iterator
@@ -26,6 +27,13 @@ from settings import GEN_MODEL
 logger = logging.getLogger(__name__)
 
 _NO_CONTEXT_REPLY = "No relevant context found in the vector store yet."
+
+
+@dataclass(frozen=True)
+class _PreparedQuery:
+    prompt: str | None
+    sources: str = ""
+    direct_reply: str | None = None
 
 
 def _resolve_source(payload: dict[str, Any]) -> str:
@@ -85,22 +93,34 @@ def _format_sources(chunks: list[dict[str, Any]]) -> str:
     return f"\n\n---\n\nSources:\n\n{joined}\n"
 
 
-def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented") -> str:
+def _prepare_query(
+    question: str,
+    rag_mode: Literal["strict", "augmented"] = "augmented",
+) -> _PreparedQuery:
     chunks = retrieve_best(question)
-
     if not chunks:
         if rag_mode == "augmented":
-            return ollama_client.generate(question, model).strip()
-        return _NO_CONTEXT_REPLY
+            return _PreparedQuery(prompt=question)
+        return _PreparedQuery(prompt=None, direct_reply=_NO_CONTEXT_REPLY)
 
-    prompt = build_prompt(question, chunks, rag_mode)
+    return _PreparedQuery(
+        prompt=build_prompt(question, chunks, rag_mode),
+        sources=_format_sources(chunks),
+    )
+
+
+def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented") -> str:
+    prepared = _prepare_query(question, rag_mode)
+    if prepared.direct_reply is not None:
+        return prepared.direct_reply
+
     with timed("generate"):
-        answer = ollama_client.generate(prompt, model).strip()
+        answer = ollama_client.generate(prepared.prompt or question, model).strip()
 
     if "Answer:" in answer:
         answer = answer.split("Answer:", 1)[1].strip()
 
-    return answer + _format_sources(chunks)
+    return answer + prepared.sources
 
 
 def ask_stream_sync(
@@ -113,26 +133,19 @@ def ask_stream_sync(
     if cancel and cancel.is_set():
         return
 
-    chunks = retrieve_best(question)
-
-    if cancel and cancel.is_set():
+    prepared = _prepare_query(question, rag_mode)
+    if prepared.direct_reply is not None:
+        yield prepared.direct_reply
         return
 
-    if not chunks:
-        if rag_mode == "augmented":
-            yield from ollama_client.stream_generate(question, model, cancel=cancel)
-        else:
-            yield _NO_CONTEXT_REPLY
-        return
-
-    prompt = build_prompt(question, chunks, rag_mode)
     with timed("stream_generate"):
-        yield from ollama_client.stream_generate(prompt, model, cancel=cancel)
+        yield from ollama_client.stream_generate(prepared.prompt or question, model, cancel=cancel)
 
     if cancel and cancel.is_set():
         return
 
-    yield _format_sources(chunks)
+    if prepared.sources:
+        yield prepared.sources
 
 
 if __name__ == "__main__":

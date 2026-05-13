@@ -7,8 +7,9 @@ which is persisted via the rag-data Docker volume.
 
 import sqlite3
 import threading
-from contextlib import suppress
 from pathlib import Path
+
+from common.sqlite_store import get_thread_local_connection
 
 DB_PATH = Path(__file__).parent.parent / "data" / "users.sqlite3"
 
@@ -16,14 +17,7 @@ _local = threading.local()
 
 
 def _get_conn() -> sqlite3.Connection:
-    if not hasattr(_local, "conn"):
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(DB_PATH))
-        with suppress(sqlite3.OperationalError):
-            conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        _local.conn = conn
-    return _local.conn
+    return get_thread_local_connection(DB_PATH, _local)
 
 
 def init_db() -> None:

@@ -22,7 +22,7 @@ dependencies = [
 
 [tool.setuptools]
 py-modules = ["settings"]
-packages = ["api", "ingest", "indexer", "web"]
+packages = ["api", "common", "ingest", "indexer", "web"]
 
 [tool.ruff]
 line-length = 100

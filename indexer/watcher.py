@@ -21,10 +21,11 @@ import yaml
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
+from common.paths import is_indexable_path, normalize_path
 from indexer.fingerprint_store import delete_hash, get_hash, init_db, upsert_hash
 from ingest.cleanup_stale import cleanup_stale
 from ingest.index_documents import delete_document, index_file
-from settings import CONFIG_PATH
+from settings import ALLOWED_EXTENSIONS, CONFIG_PATH
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,27 +91,17 @@ class IndexWorker:
 class WatchHandler(FileSystemEventHandler):
 
     def __init__(self, config, worker: IndexWorker):
-        self.allowed_ext = set(config["allowed_extensions"])
+        self.allowed_ext = set(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
         self.ignore = config["ignore_patterns"]
         self.worker = worker
 
-    def should_ignore(self, path: str) -> bool:
-        p = Path(path)
-        for pattern in self.ignore:
-            if pattern in p.parts:
-                return True
-        return False
-
-    def valid_ext(self, path: str) -> bool:
-        return Path(path).suffix.lower() in self.allowed_ext
-
     def _should_enqueue_file(self, path: str) -> bool:
         """Return True if the file at path should be processed by the indexer."""
-        return not self.should_ignore(path) and self.valid_ext(path)
+        return is_indexable_path(path, self.allowed_ext, self.ignore)
 
     def enqueue(self, path: str) -> None:
         if self._should_enqueue_file(path):
-            self.worker.submit(path)
+            self.worker.submit(normalize_path(path))
 
     def _handle_file_event(self, event) -> None:
         if not event.is_directory:
@@ -124,17 +115,18 @@ class WatchHandler(FileSystemEventHandler):
 
     def on_deleted(self, event) -> None:
         if not event.is_directory and self._should_enqueue_file(event.src_path):
-            delete_document(event.src_path)
-            delete_hash(event.src_path)
+            normalized_path = normalize_path(event.src_path)
+            delete_document(normalized_path)
+            delete_hash(normalized_path)
 
 
 def _iter_watch_paths(watch_paths: list):
     for entry in watch_paths:
-        path = Path(entry["path"]).expanduser()
-        if not path.exists():
-            logging.warning("Skipping missing path: %s", path)
+        raw_path = Path(entry["path"]).expanduser()
+        if not raw_path.exists():
+            logging.warning("Skipping missing path: %s", raw_path)
             continue
-        yield entry, path
+        yield entry, Path(normalize_path(raw_path))
 
 
 def initial_scan(watch_paths: list, handler: WatchHandler) -> None:

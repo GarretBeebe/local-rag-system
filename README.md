@@ -181,12 +181,19 @@ When `API_KEY` is set, all endpoints except `GET /` require the header:
 
     Authorization: Bearer <your-key>
 
-Leave `API_KEY` empty (the default) to disable auth for purely local use.
+Leave `API_KEY` empty only if you explicitly opt into local-only insecure mode:
+
+    ALLOW_INSECURE_LOCALONLY=true
 
 To enable the built-in web UI with username/password login, set a JWT signing secret:
 
     JWT_SECRET=<generate with: openssl rand -hex 32>
     JWT_EXPIRY_HOURS=8    # optional, default 8
+
+By default, `CORS_ORIGINS` is empty. Set it only when you need browser access from a
+different origin:
+
+    CORS_ORIGINS=https://chat.example.com,https://app.example.com
 
 **c) Uncomment the volume mounts in `docker-compose.yml`** under the `watcher` service:
 

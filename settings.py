@@ -35,8 +35,10 @@ MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 API_KEY = os.environ.get("API_KEY", "")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
+ALLOW_INSECURE_LOCALONLY = os.environ.get("ALLOW_INSECURE_LOCALONLY", "").lower() in ("1", "true")
 JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
-CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",")]
+_raw_cors_origins = os.environ.get("CORS_ORIGINS", "")
+CORS_ORIGINS = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]
 EMBED_MODEL = "nomic-embed-text"
 GEN_MODEL = "qwen2.5:14b"
 RERANK_MODEL = "BAAI/bge-reranker-base"
@@ -47,5 +49,11 @@ MAX_FILE_SIZE = 1_000_000
 MAX_EMBED_CHARS = 6000
 MAX_CHUNK_CHARS = 2000
 MAX_MD_CHUNK = 2000
+MAX_CHAT_MESSAGES = int(os.environ.get("MAX_CHAT_MESSAGES", "20"))
+MAX_CHAT_CONTENT_ITEMS = int(os.environ.get("MAX_CHAT_CONTENT_ITEMS", "32"))
+MAX_CHAT_MESSAGE_CHARS = int(os.environ.get("MAX_CHAT_MESSAGE_CHARS", "8000"))
+MAX_CHAT_TOTAL_CHARS = int(os.environ.get("MAX_CHAT_TOTAL_CHARS", "24000"))
+MAX_CHAT_QUESTION_CHARS = int(os.environ.get("MAX_CHAT_QUESTION_CHARS", "12000"))
+MAX_MODEL_NAME_CHARS = int(os.environ.get("MAX_MODEL_NAME_CHARS", "128"))
 
 qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)

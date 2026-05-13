@@ -27,6 +27,7 @@ from qdrant_client.models import (
 from tqdm import tqdm
 
 from api.embed import embed
+from common.paths import has_allowed_extension, normalize_path
 from ingest.chunkers import chunk_document
 from settings import (
     ALLOWED_EXTENSIONS,
@@ -51,11 +52,16 @@ def ensure_collection() -> None:
 
 
 def load_files() -> list[Path]:
-    return [p for p in DOCS_PATH.rglob("*") if p.is_file() and p.suffix in ALLOWED_EXTENSIONS]
+    return [
+        p
+        for p in DOCS_PATH.rglob("*")
+        if p.is_file() and has_allowed_extension(p, ALLOWED_EXTENSIONS)
+    ]
 
 
 def index_file(path: Path) -> None:
     ensure_collection()
+    normalized_path = normalize_path(path)
 
     if path.stat().st_size > MAX_FILE_SIZE:
         logger.info("Skipping large file: %s", path)
@@ -74,7 +80,7 @@ def index_file(path: Path) -> None:
         logger.info("No non-empty chunks for %s", path)
         return
 
-    document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(path.resolve())))
+    document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, normalized_path))
     start = time.monotonic()
     points = []
 
@@ -98,7 +104,7 @@ def index_file(path: Path) -> None:
                     "text": chunk,
                     "document_id": document_id,
                     "filename": path.name,
-                    "filepath": str(path.resolve()),
+                    "filepath": normalized_path,
                     "chunk_index": i,
                     "chunk_total": len(chunks),
                 },
@@ -120,11 +126,12 @@ def index_file(path: Path) -> None:
 
 
 def delete_document(filepath: Path | str) -> None:
-    logger.info("Deleting vectors for: %s", filepath)
+    normalized_path = normalize_path(filepath)
+    logger.info("Deleting vectors for: %s", normalized_path)
     qdrant_client.delete(
         collection_name=COLLECTION,
         points_selector=Filter(
-            must=[FieldCondition(key="filepath", match=MatchValue(value=str(filepath)))]
+            must=[FieldCondition(key="filepath", match=MatchValue(value=normalized_path))]
         ),
     )
 

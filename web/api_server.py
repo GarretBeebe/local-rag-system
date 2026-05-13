@@ -14,9 +14,9 @@ Run with:
 
 import asyncio
 import hmac
-import threading
 import json
 import logging
+import threading
 import time
 import uuid
 from collections import defaultdict
@@ -40,7 +40,21 @@ import api.ollama_client as ollama_client
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import rerank
-from settings import API_KEY, CORS_ORIGINS, GEN_MODEL, JWT_EXPIRY_HOURS, JWT_SECRET, RAG_MODE
+from settings import (
+    ALLOW_INSECURE_LOCALONLY,
+    API_KEY,
+    CORS_ORIGINS,
+    GEN_MODEL,
+    JWT_EXPIRY_HOURS,
+    JWT_SECRET,
+    MAX_CHAT_CONTENT_ITEMS,
+    MAX_CHAT_MESSAGES,
+    MAX_CHAT_MESSAGE_CHARS,
+    MAX_CHAT_QUESTION_CHARS,
+    MAX_CHAT_TOTAL_CHARS,
+    MAX_MODEL_NAME_CHARS,
+    RAG_MODE,
+)
 from web import user_store
 
 logger = logging.getLogger(__name__)
@@ -85,7 +99,15 @@ def _is_valid_token(token: str) -> bool:
 async def lifespan(app: FastAPI):
     user_store.init_db()
     if not API_KEY and not JWT_SECRET:
-        logger.warning("Authentication is DISABLED — set API_KEY or JWT_SECRET in .env")
+        if not ALLOW_INSECURE_LOCALONLY:
+            raise RuntimeError(
+                "Authentication is required for the API. Set API_KEY or JWT_SECRET, "
+                "or explicitly set ALLOW_INSECURE_LOCALONLY=true for local development."
+            )
+        logger.warning(
+            "Authentication is DISABLED for local-only mode because "
+            "ALLOW_INSECURE_LOCALONLY=true"
+        )
     warm_task = asyncio.create_task(_warm_models())
     try:
         yield
@@ -98,6 +120,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
 app.mount("/ui", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
+
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next: Callable[..., Any]):
@@ -160,14 +183,33 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    model: str
-    messages: list[ChatMessage] = Field(min_length=1)
+    model: str = Field(min_length=1, max_length=MAX_MODEL_NAME_CHARS)
+    messages: list[ChatMessage] = Field(min_length=1, max_length=MAX_CHAT_MESSAGES)
     stream: bool | None = False
     rag_mode: Literal["strict", "augmented"] | None = None
 
 
 def _resolve_rag_mode(req: ChatRequest) -> Literal["strict", "augmented"]:
     return req.rag_mode or RAG_MODE
+
+
+def _message_size(content: str | list[dict[str, str]]) -> int:
+    if isinstance(content, str):
+        return len(content)
+    return sum(len(str(v)) for item in content if isinstance(item, dict) for v in item.values())
+
+
+def _validate_chat_request(req: ChatRequest) -> None:
+    total_chars = 0
+    for message in req.messages:
+        size = _message_size(message.content)
+        if size > MAX_CHAT_MESSAGE_CHARS:
+            raise HTTPException(status_code=400, detail="Chat message exceeds size limit")
+        total_chars += size
+        if total_chars > MAX_CHAT_TOTAL_CHARS:
+            raise HTTPException(status_code=400, detail="Chat request exceeds total size limit")
+        if isinstance(message.content, list) and len(message.content) > MAX_CHAT_CONTENT_ITEMS:
+            raise HTTPException(status_code=400, detail="Structured message has too many items")
 
 
 def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
@@ -189,6 +231,8 @@ def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
     question = question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Last message content is empty")
+    if len(question) > MAX_CHAT_QUESTION_CHARS:
+        raise HTTPException(status_code=400, detail="Question exceeds size limit")
     return question
 
 
@@ -376,6 +420,7 @@ def models_alias():
 
 @app.post("/v1/chat/completions")
 async def chat(request: Request, req: ChatRequest):
+    _validate_chat_request(req)
     question = _extract_question_from_messages(req.messages)
     rag_mode = _resolve_rag_mode(req)
 
