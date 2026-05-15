@@ -175,6 +175,12 @@ you want indexed. Use the container-side mount paths (`/watch/…`):
     NEXTCLOUD_PATH=/home/yourname/Nextcloud
     CODE_PATH=/home/yourname/Code
 
+Set a Qdrant API key. This is required by `docker-compose.yml` so the vector
+database is not accessible unauthenticated from other containers on the Docker
+network:
+
+    QDRANT_API_KEY=<generate with: openssl rand -hex 32>
+
 If the API is exposed beyond localhost (e.g. behind a reverse proxy), set an API key:
 
     API_KEY=<generate with: openssl rand -hex 32>
@@ -215,7 +221,9 @@ Any model available in Ollama can be selected per-request; see the [Models](#mod
 
     docker compose up -d
 
-This starts three containers: `rag-qdrant`, `rag-api`, and `rag-watcher`.
+This builds one shared `rag-system:latest` image, then starts three containers:
+`rag-qdrant`, `rag-api`, and `rag-watcher`. The API and watcher containers run
+the same image with different commands.
 
 ## 4. Verify
 
@@ -342,20 +350,22 @@ Example container config:
       - .md
       - .txt
       - .py
-      - .yaml
-      - .yml
-      - .json
-      - .toml
       - .js
       - .ts
       - .go
       - .rs
       # see watcher_config.container.yaml for the full list
+      # config/script extensions such as .yaml, .json, .toml, .ini,
+      # .cfg, .sql, and .sh are intentionally excluded by default
 
     ignore_patterns:
       - .git
       - node_modules
       - __pycache__
+      - .env
+      - .ssh
+      - "*.pem"
+      - "*secret*"
 
 ------------------------------------------------------------------------
 
@@ -604,11 +614,11 @@ Runtime controls:
 | API key auth | Set `API_KEY` in `.env`. All endpoints except `GET /`, `/favicon.ico`, `/ui/*`, and `/auth/login` require `Authorization: Bearer <key>`. Compared with `hmac.compare_digest` (timing-safe). |
 | Web UI auth | Set `JWT_SECRET` in `.env`. Browser users log in with username/password; server issues an 8-hour JWT. Credentials stored as bcrypt hashes in `data/users.sqlite3`. Login returns 503 if `JWT_SECRET` is unset. |
 | Auth disabled local mode | If both `API_KEY` and `JWT_SECRET` are unset, startup fails unless `ALLOW_INSECURE_LOCALONLY=true` is set explicitly. Use only for local development. |
-| Rate limiting | 30 requests per minute per IP, applied to all endpoints including `/auth/login`. Returns `429` when exceeded. |
+| Rate limiting | General API requests are limited to 30 requests per minute per IP. `/auth/login` uses a separate tighter 10 attempts per minute per-IP bucket. Returns `429` when exceeded. |
 | Security headers | All responses include `Content-Security-Policy`, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`. |
 | XSS protection | LLM output in the web UI is sanitised with DOMPurify before rendering as HTML. `marked.js` and `DOMPurify` are vendored — no CDN dependency. |
 | CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins). Empty by default, which disables cross-origin browser access. |
-| Qdrant isolation | Qdrant is not bound to any host port — only reachable within the Docker network. |
+| Qdrant isolation | Qdrant is not bound to any host port — only reachable within the Docker network. `QDRANT_API_KEY` is required so other containers on that network cannot access it unauthenticated. |
 | Read-only mounts | Watcher volume mounts use `:ro` — the container cannot write to your document directories. |
 
 ------------------------------------------------------------------------
