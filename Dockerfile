@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY pyproject.toml .
 COPY . .
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
 RUN pip install --no-cache-dir -e .
 
 ENV PYTHONUNBUFFERED=1
