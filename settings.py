@@ -22,6 +22,7 @@ DOCS_PATH = PROJECT_ROOT / "documents"
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 COLLECTION = "documents"
 VECTOR_SIZE = 768
 
@@ -56,4 +57,7 @@ MAX_CHAT_TOTAL_CHARS = int(os.environ.get("MAX_CHAT_TOTAL_CHARS", "120000"))
 MAX_CHAT_QUESTION_CHARS = int(os.environ.get("MAX_CHAT_QUESTION_CHARS", "12000"))
 MAX_MODEL_NAME_CHARS = int(os.environ.get("MAX_MODEL_NAME_CHARS", "128"))
 
-qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+qdrant_client = QdrantClient(
+    url=f"http://{QDRANT_HOST}:{QDRANT_PORT}",
+    api_key=QDRANT_API_KEY or None,
+)

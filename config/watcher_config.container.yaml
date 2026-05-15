@@ -30,13 +30,6 @@ allowed_extensions:
   - .md
   - .txt
   - .py
-  - .yaml
-  - .yml
-  - .json
-  - .toml
-  - .cfg
-  - .ini
-  - .sql
   - .js
   - .ts
   - .tsx
@@ -47,7 +40,6 @@ allowed_extensions:
   - .cpp
   - .h
   - .hpp
-  - .sh
 
 
 ignore_patterns:
@@ -80,6 +72,37 @@ ignore_patterns:
   # IDE
   - ".idea"
   - ".vscode"
+
+  # Secrets and credentials
+  - ".env"
+  - ".env.*"
+  - ".aws"
+  - ".azure"
+  - ".config/gcloud"
+  - ".gnupg"
+  - ".ssh"
+  - "*.key"
+  - "*.pem"
+  - "*.p12"
+  - "*.pfx"
+  - "*secret*"
+  - "*secrets*"
+  - "*credential*"
+  - "*credentials*"
+  - "*token*"
+  - "*tokens*"
+  - "id_rsa"
+  - "id_dsa"
+  - "id_ecdsa"
+  - "id_ed25519"
+  - "*.cfg"
+  - "*.ini"
+  - "*.json"
+  - "*.sql"
+  - "*.sh"
+  - "*.toml"
+  - "*.yaml"
+  - "*.yml"
 
   # OS junk
   - ".DS_Store"

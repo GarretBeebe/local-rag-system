@@ -31,6 +31,7 @@ services:
     environment:
       QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       QDRANT__TELEMETRY_DISABLED: "true"
 
   api:
@@ -48,6 +49,7 @@ services:
     environment:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       HF_TOKEN: ${HF_TOKEN:-}
       RAG_MODE: ${RAG_MODE:-strict}
@@ -86,6 +88,7 @@ services:
     environment:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       CONFIG_PATH: /app/config/watcher_config.container.yaml
       HF_TOKEN: ${HF_TOKEN:-}

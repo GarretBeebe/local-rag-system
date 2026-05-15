@@ -65,21 +65,28 @@ _RAG_CONCURRENCY = asyncio.Semaphore(4)
 
 _RATE_WINDOW = 60.0
 _RATE_MAX = 30
+_LOGIN_RATE_MAX = 10
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
+_login_rate_buckets: dict[str, list[float]] = defaultdict(list)
 _rate_lock = asyncio.Lock()
 
 _WEB_DIR = Path(__file__).parent
 
 
-async def _check_rate_limit(ip: str) -> bool:
+async def _check_rate_limit(
+    ip: str,
+    *,
+    buckets: dict[str, list[float]] = _rate_buckets,
+    max_requests: int = _RATE_MAX,
+) -> bool:
     async with _rate_lock:
         now = time.monotonic()
-        _rate_buckets[ip] = [t for t in _rate_buckets[ip] if now - t < _RATE_WINDOW]
-        if not _rate_buckets[ip]:
-            del _rate_buckets[ip]
-        elif len(_rate_buckets[ip]) >= _RATE_MAX:
+        buckets[ip] = [t for t in buckets[ip] if now - t < _RATE_WINDOW]
+        if not buckets[ip]:
+            del buckets[ip]
+        elif len(buckets[ip]) >= max_requests:
             return False
-        _rate_buckets[ip].append(now)
+        buckets[ip].append(now)
         return True
 
 
@@ -131,12 +138,18 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]):
         return await call_next(request)
 
     client_ip = request.client.host if request.client else "unknown"
-    if not await _check_rate_limit(client_ip):
-        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
-
     # Login endpoint is rate-limited but does not require a token
     if request.url.path == "/auth/login":
+        if not await _check_rate_limit(
+            client_ip,
+            buckets=_login_rate_buckets,
+            max_requests=_LOGIN_RATE_MAX,
+        ):
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
         return await call_next(request)
+
+    if not await _check_rate_limit(client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
     if API_KEY or JWT_SECRET:
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
@@ -431,7 +444,6 @@ async def chat(request: Request, req: ChatRequest):
         )
 
     answer = await _run_rag_with_timeout(question, req.model, rag_mode)
-    logger.info("Answer: %s", answer[:200])
     return _build_chat_response(answer, req.model)
 
 
