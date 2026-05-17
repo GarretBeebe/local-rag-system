@@ -10,6 +10,7 @@ Entry point for callers is retrieve_best(), which runs all three stages and
 returns the top-ranked chunks ready to be passed to the LLM.
 """
 
+import difflib
 import logging
 import math
 import re
@@ -53,7 +54,10 @@ def _extract_filename(question: str) -> str | None:
         return None
     candidate = match.group(1)
     known = {Path(p).name for p in list_all_paths()}
-    return candidate if candidate in known else None
+    if candidate in known:
+        return candidate
+    close = difflib.get_close_matches(candidate, known, n=1, cutoff=0.75)
+    return close[0] if close else None
 
 
 def cosine(a: list[float], b: list[float]) -> float:
