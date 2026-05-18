@@ -11,6 +11,7 @@ config/watcher_config.container.yaml (set via CONFIG_PATH env var).
 
 import hashlib
 import logging
+import sys
 import threading
 import time
 from collections.abc import Generator
@@ -90,15 +91,15 @@ class IndexWorker:
 
 class WatchHandler(FileSystemEventHandler):
 
-    def __init__(self, config: dict, worker: IndexWorker, watch_roots: list[Path]):
+    def __init__(self, config: dict, worker: IndexWorker, required_mount_roots: list[Path]):
         self.allowed_ext = set(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
         self.ignore = config["ignore_patterns"]
         self.worker = worker
-        self.watch_roots = watch_roots
+        self.required_mount_roots = required_mount_roots
 
-    def _broken_mount_root(self, file_path: Path) -> Path | None:
-        """Return the watch root that appears to be an empty broken mount, or None."""
-        for root in self.watch_roots:
+    def _broken_mount_for(self, file_path: Path) -> Path | None:
+        """Return the required mount root that is empty (broken bind mount), or None."""
+        for root in self.required_mount_roots:
             if file_path.is_relative_to(root) and not any(root.iterdir()):
                 return root
         return None
@@ -124,7 +125,7 @@ class WatchHandler(FileSystemEventHandler):
     def on_deleted(self, event) -> None:
         if event.is_directory or not self._should_enqueue_file(event.src_path):
             return
-        broken_root = self._broken_mount_root(Path(event.src_path))
+        broken_root = self._broken_mount_for(Path(event.src_path))
         if broken_root is not None:
             logging.warning(
                 "Skipping delete for %s — root %s is empty, likely a broken bind mount. "
@@ -146,20 +147,27 @@ def _iter_watch_paths(watch_paths: list) -> Generator[tuple[dict, Path], None, N
         yield entry, Path(normalize_path(raw_path))
 
 
-def _build_accessible_roots(watch_path_pairs: list[tuple[dict, Path]]) -> list[Path]:
-    """Return roots that are non-empty; warn and skip roots that look like broken mounts."""
-    accessible = []
-    for _, root in watch_path_pairs:
-        if any(root.iterdir()):
-            accessible.append(root)
-        else:
-            logging.warning(
-                "Mount at %s is empty — skipping stale-entry cleanup for this root. "
-                "Existing index entries preserved. Fix the mount and run: "
-                "docker compose restart watcher",
-                root,
+def validate_required_mounts(required_mounts: list[dict]) -> list[Path]:
+    """Validate bind mount roots at startup. Exits with code 1 if any are missing or empty."""
+    if not required_mounts:
+        logging.warning("No required_mounts configured — skipping mount validation")
+        return []
+    roots = []
+    for entry in required_mounts:
+        root = Path(normalize_path(entry["path"]))
+        if not root.exists():
+            logging.error(
+                "Required mount %s does not exist — exiting so Docker can restart", root
             )
-    return accessible
+            sys.exit(1)
+        if entry.get("require_non_empty", False) and not any(root.iterdir()):
+            logging.error(
+                "Required mount %s is empty — exiting so Docker can restart", root
+            )
+            sys.exit(1)
+        logging.info("Mount %s OK", root)
+        roots.append(root)
+    return roots
 
 
 def initial_scan(watch_path_pairs: list[tuple[dict, Path]], handler: WatchHandler) -> None:
@@ -172,15 +180,16 @@ def initial_scan(watch_path_pairs: list[tuple[dict, Path]], handler: WatchHandle
 
 
 def main() -> None:
-    init_db()
     config = load_config()
+    required_mount_roots = validate_required_mounts(config.get("required_mounts", []))
+
+    init_db()
     worker = IndexWorker()
 
     watch_path_pairs = list(_iter_watch_paths(config["watch_paths"]))
-    all_roots = [path for _, path in watch_path_pairs]
-    accessible_roots = _build_accessible_roots(watch_path_pairs)
+    accessible_roots = [root for _, root in watch_path_pairs]
 
-    handler = WatchHandler(config, worker, all_roots)
+    handler = WatchHandler(config, worker, required_mount_roots)
     cleanup_stale(accessible_roots)
     initial_scan(watch_path_pairs, handler)
 

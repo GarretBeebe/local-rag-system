@@ -1,3 +1,10 @@
+required_mounts:
+  - path: "/watch/Code"
+    require_non_empty: true
+  - path: "/watch/Nextcloud"
+    require_non_empty: true
+
+
 watch_paths:
 
   - path: "/watch/Nextcloud/AI-ML"
