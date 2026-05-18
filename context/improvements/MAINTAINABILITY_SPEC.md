@@ -21,11 +21,19 @@ Each phase is grounded in specific file locations and concrete decisions. No cod
 1. `ingest/index_documents.py` — `index_file()`:
    - Change return type from `None` to an explicit string literal:
      `Literal["indexed", "skipped", "failed"]`
-   - Call `delete_document(path)` before upserting replacement chunks (reuse existing function)
+   - Use a prepare-then-swap sequence to avoid data loss:
+     1. Read, chunk, and embed all replacement chunks into memory first
+     2. Only if all replacements are ready: call `delete_document(path)`, then upsert
+     3. Never call `delete_document(path)` before replacements exist in memory
+   - Qdrant operations are not transactional. Define and document an explicit failure policy:
+     - If delete succeeds but upsert fails: log as `"failed"`, do not update fingerprint;
+       document is now absent from the index until next successful re-index
+     - If upsert partially succeeds: treat as `"failed"` and log which chunks were written;
+       do not update fingerprint
    - Return `"skipped"` for: file too large, unreadable, empty chunks after stripping
    - Return `"failed"` if embedding produces no valid chunks (currently logs warning "No valid
-     chunks to index" and returns `None`)
-   - Return `"indexed"` only on successful Qdrant upsert
+     chunks to index" and returns `None`), or if any Qdrant operation fails
+   - Return `"indexed"` only on successful delete + upsert
    - Fix `chunk_total` in payload: currently assigned from `len(chunks)` before embedding; some
      chunks may fail embedding, making the count wrong — assign after filtering
 
@@ -36,6 +44,8 @@ Each phase is grounded in specific file locations and concrete decisions. No cod
 **Decision required before coding:**
 If a re-index partially fails (some chunks embed, some don't), should the old document be
 preserved or replaced with a partial index? Pick one and document it. Do not leave ambiguous.
+The failure policy above assumes "absent until next success" — confirm this is acceptable before
+coding.
 
 **Regression tests (must exist before any other re-indexing refactor):**
 - Index a file, modify it, re-index → Qdrant must contain exactly one version (filter by
@@ -72,9 +82,12 @@ Choose one packaging approach:
    - Reorder so dependency install comes before source copy:
      ```
      COPY pyproject.toml .
-     RUN pip install torch --index-url ... && pip install -e ".[dev]"
+     RUN pip install torch --index-url ... && pip install -e .
      COPY . .
      ```
+   - Do not install dev dependencies (`.[dev]`) in the runtime image. If local dev tooling
+     inside the container is needed, use a separate `--target dev` build stage or a
+     `docker-compose.override.yml` that mounts the source and runs `pip install -e ".[dev]"`.
    - Add `.dockerignore` excluding: `data/`, `*.sqlite3`, `__pycache__`, `.git`, `context/`
 
 3. Lock file: generate and commit whichever format the strategy decision selects
@@ -92,20 +105,20 @@ Choose one packaging approach:
 
 1. Rename `ingest/test_rag.py` → `scripts/smoke_rag.py` and exclude from pytest discovery
 
-2. Create `tests/` with unit tests for:
+2. Create `tests/` with unit tests (no Qdrant or Ollama required):
    - `test_chunking.py`: chunk count, overlap, empty input
    - `test_paths.py`: path normalization, ignore matching
    - `test_auth.py`: JWT creation, validation, expiry, invalid tokens
    - `test_retrieval.py`:
-     - deduplication by ID
-     - MMR selection with known vectors
-     - **changed-file re-indexing leaves exactly one document version in Qdrant** ← highest
-       priority; must be present before any retrieval or indexing refactor
-     - **failed/empty re-index does not mark fingerprint as current**
+     - deduplication by ID (pure logic, no Qdrant)
+     - MMR selection with known vectors (pure logic)
    - `test_request_validation.py`: size limits, malformed messages, structured content
 
-3. Integration tests:
-   - Mark with `@pytest.mark.integration`
+3. Integration tests (require real Qdrant; marked `@pytest.mark.integration`):
+   - **changed-file re-indexing leaves exactly one document version in Qdrant** ← highest
+     priority; must be present before any retrieval or indexing refactor. These tests require
+     live Qdrant to count points by `filepath` payload filter and belong here, not in unit tests.
+   - **failed/empty re-index does not mark fingerprint as current**
    - Require real Qdrant and Ollama; skip automatically if unavailable
    - Run with `pytest -m integration`; unit-only run: `pytest -m "not integration"`
 
@@ -120,18 +133,21 @@ Choose one packaging approach:
 **Problem (confirmed in code):**
 
 `settings.py` (line ~60-63):
-- `qdrant_client = QdrantClient(...)` — module-level; Qdrant must be reachable at import time
+- `qdrant_client = QdrantClient(...)` — module-level; constructing the client object is itself
+  an import-time side effect, though the main network cost comes from the next point below
 
 `api/retrieval.py` (lines 44-45):
 - `reranker = CrossEncoder(RERANK_MODEL, device="cpu")` — blocks on model download at import
-- `keyword_index = KeywordIndex()` — triggers full Qdrant scroll and spawns daemon thread at import
+- `keyword_index = KeywordIndex()` — triggers `_build()` which scrolls all of Qdrant, and
+  spawns a daemon refresh thread; this is the primary source of import-time network cost
 
 `api/keyword_index.py` — `KeywordIndex.__init__()`:
-- Calls `_build()` immediately (blocking Qdrant scroll)
+- Calls `_build()` immediately (blocking full Qdrant scroll with `limit=1000` pagination)
 - Spawns `_refresh_loop` daemon thread
 
 These two problems are merged into one phase because fixing retrieval import side effects without
-first fixing the settings client factory would still trigger a Qdrant connection through settings.
+first removing the module-level `QdrantClient` from settings would leave an import-time client
+construction in place even after moving `KeywordIndex` initialization.
 
 **Required changes (in dependency order):**
 
@@ -170,27 +186,43 @@ first fixing the settings client factory would still trigger a Qdrant connection
   every query — full SQLite table scan each call
 - No logging of index size, rebuild duration, or refresh errors beyond a bare warning
 
-**Design decision required before coding:**
-The incremental update approach must be pinned before implementation begins. Two options:
-- (a) Persist keyword index to disk (pickle or SQLite FTS) and rebuild only changed docs
-- (b) Feed watcher add/remove events into `KeywordIndex` incrementally via `add_document()` /
-  `remove_document()` methods
+**Cross-process constraint (must inform the design decision):**
+The watcher and API run in separate Docker containers sharing `/app/data` on disk. They do not
+share Python memory. Any approach that relies on in-memory state updated by the watcher process
+will not be visible in the API process, and vice versa. This rules out:
+- In-memory caches in `fingerprint_store.py` invalidated by watcher writes
+- Feeding watcher add/remove events directly into `KeywordIndex` object state in the API process
 
-Do not start this phase without choosing one.
+**Design decision required before coding:**
+Choose one cross-process-safe approach:
+- (a) **Qdrant-derived periodic rebuild**: keep the current full-scroll refresh but add logging
+  and move it out of startup blocking. This is the simplest option and avoids new infrastructure.
+- (b) **SQLite event table**: watcher writes add/remove events to a shared SQLite table in
+  `/app/data`; API process polls the table on each refresh cycle to apply incremental updates
+  to the in-memory BM25 index without a full Qdrant scroll
+- (c) **SQLite FTS5 as the keyword index**: replace BM25Okapi with SQLite FTS5 in a shared
+  database; watcher writes to it directly; API reads from it — no separate rebuild cycle
+
+Option (a) is lowest risk. Options (b) and (c) require careful SQLite WAL mode configuration
+and read/write coordination across processes. Do not start without choosing one.
 
 **Required changes (after design decision):**
 
 1. `api/keyword_index.py`:
-   - Add logging: document count, rebuild duration, Qdrant errors
-   - Add `add_document(id, payload)` and `remove_document(id)` for whichever approach is chosen
+   - Add logging: document count, rebuild duration, Qdrant errors during refresh
+   - If option (b): add SQLite event table polling during refresh cycle
+   - If option (c): replace BM25Okapi with FTS5 queries against shared DB
 
-2. `api/retrieval.py`:
-   - Cache `list_all_paths()` result for filename extraction; invalidate on index rebuild
-   - Or: maintain a filename set inside `KeywordIndex` updated on add/remove
+2. `api/retrieval.py` — filename extraction:
+   - `_extract_filename()` calls `list_all_paths()` (full SQLite table scan) on every query
+   - Fix: cache the result inside `KeywordIndex` and refresh it on each rebuild cycle (not
+     per-query). The cache lives in the API process only; it is repopulated from SQLite on each
+     periodic refresh, which is safe since SQLite is the shared source of truth.
 
 3. `indexer/fingerprint_store.py`:
-   - `list_all_paths()` does a full table scan; add an in-memory cache updated on
-     `upsert_hash()` and `delete_hash()` calls
+   - Do not add an in-memory cache here — the watcher and API are separate processes and such a
+     cache would be stale in the API. Instead, rely on the `KeywordIndex` refresh cycle
+     (above) to repopulate filename state from SQLite at a controlled interval.
 
 ---
 
