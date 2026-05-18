@@ -42,7 +42,7 @@ _raw_cors_origins = os.environ.get("CORS_ORIGINS", "")
 CORS_ORIGINS = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]
 EMBED_MODEL = "nomic-embed-text"
 GEN_MODEL = "qwen2.5:14b"
-RERANK_MODEL = "BAAI/bge-reranker-base"
+RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 ALLOWED_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml"}
 
