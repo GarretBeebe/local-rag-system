@@ -10,7 +10,6 @@ dependencies = [
     "qdrant-client",
     "sentence-transformers",
     "rank-bm25",
-    "langchain-text-splitters",
     "watchdog",
     "pyyaml",
     "tqdm",

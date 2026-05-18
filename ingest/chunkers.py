@@ -8,7 +8,7 @@ on file extension:
                        or the file contains no top-level definitions
   - .md / .markdown  — splits at Markdown header boundaries (H1–H6)
   - all others       — recursive character splitting with a 500-character window
-                       and 100-character overlap (LangChain default)
+                       and 100-character overlap
 
 Public API: chunk_document(path, text) -> list[str]
 """
@@ -17,18 +17,69 @@ import ast
 import re
 from pathlib import Path
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from settings import MAX_CHUNK_CHARS, MAX_MD_CHUNK
 
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=100,
-)
+_SEPARATORS = ["\n\n", "\n", " ", ""]
+_CHUNK_SIZE = 500
+_CHUNK_OVERLAP = 100
+
+
+def _merge_splits(splits: list[str], separator: str) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    sep_len = len(separator)
+
+    for split in splits:
+        split_len = len(split)
+        added_len = split_len + (sep_len if current else 0)
+        if current and current_len + added_len > _CHUNK_SIZE:
+            chunks.append(separator.join(current))
+            while current and current_len > _CHUNK_OVERLAP:
+                dropped = len(current[0]) + (sep_len if len(current) > 1 else 0)
+                current_len -= dropped
+                current.pop(0)
+        current.append(split)
+        current_len += split_len + (sep_len if len(current) > 1 else 0)
+
+    if current:
+        chunks.append(separator.join(current))
+
+    return chunks
+
+
+def _recursive_split(text: str, separators: list[str]) -> list[str]:
+    separator = separators[-1]
+    remaining: list[str] = []
+    for i, sep in enumerate(separators):
+        if sep == "" or sep in text:
+            separator = sep
+            remaining = separators[i + 1:]
+            break
+
+    parts = [s for s in text.split(separator) if s] if separator else list(text)
+    good: list[str] = []
+    result: list[str] = []
+
+    for part in parts:
+        if len(part) > _CHUNK_SIZE:
+            if good:
+                result.extend(_merge_splits(good, separator))
+                good = []
+            result.extend(_recursive_split(part, remaining) if remaining else [part])
+        else:
+            good.append(part)
+
+    if good:
+        result.extend(_merge_splits(good, separator))
+
+    return result
 
 
 def chunk_text(text: str) -> list[str]:
-    return text_splitter.split_text(text)
+    if not text.strip():
+        return []
+    return _recursive_split(text, _SEPARATORS)
 
 
 # -------------------------
