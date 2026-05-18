@@ -52,7 +52,7 @@ def build_prompt(
         source = _resolve_source(p)
         chunk_ref = f"{p.get('chunk_index', '?')}/{p.get('chunk_total', '?')}"
         cite = f"[S{i}] {source} (chunk {chunk_ref})"
-        context_blocks.append(f"{cite}\n{p['text']}")
+        context_blocks.append(f"{cite}\n{p.get('text', '')}")
 
     context = "\n\n---\n\n".join(context_blocks)
 

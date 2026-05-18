@@ -28,7 +28,7 @@ class KeywordIndex:
         self._lock = threading.Lock()
         self._refresh_interval = refresh_interval
         self.docs: list = []
-        self.meta: list = []
+        self.payloads: list = []
         self.ids: list = []
         self.bm25: BM25Okapi | None = None
         self.known_filenames: set[str] = set()
@@ -44,7 +44,7 @@ class KeywordIndex:
 
     def _build(self) -> None:
         t0 = time.monotonic()
-        docs, meta, ids, filenames = [], [], [], set()
+        docs, payloads, ids, filenames = [], [], [], set()
         offset = None
         while True:
             points, next_offset = get_qdrant_client().scroll(
@@ -55,9 +55,9 @@ class KeywordIndex:
             )
             for p in points:
                 filename = p.payload.get("filename", "")
-                text = f"{filename} {p.payload['text']}"
+                text = f"{filename} {p.payload.get('text', '')}"
                 docs.append(text.lower().split())
-                meta.append(p.payload)
+                payloads.append(p.payload)
                 ids.append(p.id)
                 if filename:
                     filenames.add(filename)
@@ -67,7 +67,7 @@ class KeywordIndex:
         bm25 = BM25Okapi(docs) if docs else None
         elapsed = time.monotonic() - t0
         with self._lock:
-            self.docs, self.meta, self.ids, self.bm25 = docs, meta, ids, bm25
+            self.docs, self.payloads, self.ids, self.bm25 = docs, payloads, ids, bm25
             self.known_filenames = filenames
         logger.info("KeywordIndex built: %d docs in %.2fs", len(docs), elapsed)
 
@@ -81,12 +81,12 @@ class KeywordIndex:
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
-            bm25, ids, meta = self.bm25, self.ids, self.meta
+            bm25, ids, payloads = self.bm25, self.ids, self.payloads
         if bm25 is None:
             return []
         tokens = query.lower().split()
         scores = bm25.get_scores(tokens)
-        pairs = ((s, pid, m) for s, pid, m in zip(scores, ids, meta, strict=False) if s > 0)
+        pairs = ((s, pid, pl) for s, pid, pl in zip(scores, ids, payloads, strict=False) if s > 0)
         ranked = heapq.nlargest(limit, pairs, key=lambda x: x[0])
         return [
             {"id": pid, "payload": payload, "bm25_score": score}

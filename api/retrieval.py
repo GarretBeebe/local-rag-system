@@ -169,7 +169,7 @@ def rerank(question: str, candidates: list[Chunk], top_n: int = 4) -> list[Chunk
         return []
 
     with timed("rerank"):
-        pairs = [(question, c.payload["text"]) for c in candidates]
+        pairs = [(question, c.payload.get("text", "")) for c in candidates]
         scores = _get_reranker().predict(pairs)
 
     if len(scores) != len(candidates):
@@ -213,6 +213,17 @@ def hybrid_recall(
     return vector_results + keyword_candidates
 
 
+def _deduplicate(candidates: list[Chunk]) -> list[Chunk]:
+    """Remove duplicate chunks by point id, preserving order."""
+    seen: set = set()
+    result = []
+    for c in candidates:
+        if c.id not in seen:
+            seen.add(c.id)
+            result.append(c)
+    return result
+
+
 def retrieve_best(
     question: str,
     recall_k: int = RECALL_K,
@@ -232,13 +243,7 @@ def retrieve_best(
         return []
 
     # Dedupe by point id — vector and keyword results can overlap.
-    seen: set = set()
-    deduped = []
-    for c in candidates:
-        if c.id not in seen:
-            seen.add(c.id)
-            deduped.append(c)
-    candidates = deduped
+    candidates = _deduplicate(candidates)
 
     vector_candidates = [c for c in candidates if c.vector is not None]
 

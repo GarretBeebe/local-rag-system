@@ -10,7 +10,6 @@ Can also be run directly as a script to batch-index the documents directory:
   python ingest/index_documents.py
 """
 
-import functools
 import logging
 import time
 import uuid
@@ -42,7 +41,6 @@ from settings import (
 logger = logging.getLogger(__name__)
 
 
-@functools.cache
 def ensure_collection() -> None:
     if not get_qdrant_client().collection_exists(COLLECTION):
         logger.info("Collection missing — creating new collection")
@@ -60,22 +58,77 @@ def load_files() -> list[Path]:
     ]
 
 
+def _read_file(path: Path) -> str | None:
+    """Return file text, or None if the file should be skipped."""
+    if path.stat().st_size > MAX_FILE_SIZE:
+        logger.info("Skipping large file: %s", path)
+        return None
+    try:
+        text = path.read_text(errors="ignore")
+        logger.debug("Read %s with errors='ignore'", path)
+        return text
+    except Exception as e:
+        logger.warning("Skipping unreadable file %s: %s", path, e)
+        return None
+
+
+def _embed_chunks(path: Path, chunks: list[str], document_id: str) -> list[PointStruct]:
+    """Embed each chunk and return PointStructs with metadata."""
+    points = []
+    normalized = normalize_path(path)
+    for i, chunk in enumerate(chunks):
+        try:
+            vec = embed(chunk)
+        except Exception as e:
+            logger.warning("Skipping chunk %s for %s due to embedding failure: %s", i, path, e)
+            continue
+        points.append(
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=vec,
+                payload={
+                    "text": chunk,
+                    "document_id": document_id,
+                    "filename": path.name,
+                    "filepath": normalized,
+                    "chunk_index": i,
+                    "chunk_total": 0,  # corrected below once all chunks are embedded
+                },
+            )
+        )
+    for p in points:
+        p.payload["chunk_total"] = len(points)
+    return points
+
+
+def _upsert_chunks(path: Path, points: list[PointStruct]) -> Literal["indexed", "failed"]:
+    """Delete existing vectors for path then upsert the new points."""
+    try:
+        delete_document(path)
+    except Exception as e:
+        logger.error("Failed to delete existing vectors for %s: %s", path, e)
+        return "failed"
+    try:
+        get_qdrant_client().upsert(collection_name=COLLECTION, points=points)
+    except Exception as e:
+        # Delete succeeded but upsert failed: document is absent until next successful re-index.
+        logger.error(
+            "Upsert failed for %s after delete — absent from index until next re-index: %s",
+            path, e,
+        )
+        return "failed"
+    return "indexed"
+
+
 def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
     ensure_collection()
     normalized_path = normalize_path(path)
 
-    if path.stat().st_size > MAX_FILE_SIZE:
-        logger.info("Skipping large file: %s", path)
-        return "skipped"
-
     t_read = time.monotonic()
-    try:
-        text = path.read_text(errors="ignore")
-        logger.debug("Read %s with errors='ignore'", path)
-    except Exception as e:
-        logger.warning("Skipping unreadable file %s: %s", path, e)
-        return "skipped"
+    text = _read_file(path)
     t_read = time.monotonic() - t_read
+    if text is None:
+        return "skipped"
 
     t_chunk = time.monotonic()
     chunks = chunk_document(path, text)
@@ -89,68 +142,23 @@ def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, normalized_path))
 
     t_embed = time.monotonic()
-    points = []
-    for i, chunk in enumerate(chunks):
-        try:
-            vec = embed(chunk)
-        except Exception as e:
-            logger.warning("Skipping chunk %s for %s due to embedding failure: %s", i, path, e)
-            continue
-
-        points.append(
-            PointStruct(
-                id=str(uuid.uuid4()),
-                vector=vec,
-                payload={
-                    "text": chunk,
-                    "document_id": document_id,
-                    "filename": path.name,
-                    "filepath": normalized_path,
-                    "chunk_index": i,
-                    "chunk_total": 0,  # corrected below once all chunks are embedded
-                },
-            )
-        )
+    points = _embed_chunks(path, chunks, document_id)
     t_embed = time.monotonic() - t_embed
 
     if not points:
         logger.warning("No valid chunks to index for %s", path)
         return "failed"
 
-    # Correct chunk_total now that we know how many chunks actually embedded.
-    for p in points:
-        p.payload["chunk_total"] = len(points)
-
-    # Prepare-then-swap: all replacement points are ready; now do destructive ops.
     t_upsert = time.monotonic()
-    try:
-        delete_document(path)
-    except Exception as e:
-        logger.error("Failed to delete existing vectors for %s: %s", path, e)
-        return "failed"
-
-    try:
-        get_qdrant_client().upsert(collection_name=COLLECTION, points=points)
-    except Exception as e:
-        # Delete succeeded but upsert failed: document is absent until next successful re-index.
-        logger.error(
-            "Upsert failed for %s after delete — absent from index until next re-index: %s",
-            path,
-            e,
-        )
-        return "failed"
+    result = _upsert_chunks(path, points)
     t_upsert = time.monotonic() - t_upsert
 
-    logger.info(
-        "Indexed %s: %d chunks — read=%.2fs chunk=%.2fs embed=%.2fs upsert=%.2fs",
-        path,
-        len(points),
-        t_read,
-        t_chunk,
-        t_embed,
-        t_upsert,
-    )
-    return "indexed"
+    if result == "indexed":
+        logger.info(
+            "Indexed %s: %d chunks — read=%.2fs chunk=%.2fs embed=%.2fs upsert=%.2fs",
+            path, len(points), t_read, t_chunk, t_embed, t_upsert,
+        )
+    return result
 
 
 def delete_document(filepath: Path | str) -> None:

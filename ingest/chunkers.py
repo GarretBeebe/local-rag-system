@@ -17,11 +17,9 @@ import ast
 import re
 from pathlib import Path
 
-from settings import MAX_CHUNK_CHARS, MAX_MD_CHUNK
+from settings import CHUNK_OVERLAP, CHUNK_SIZE, MAX_CHUNK_CHARS, MAX_MD_CHUNK
 
 _SEPARATORS = ["\n\n", "\n", " ", ""]
-_CHUNK_SIZE = 500
-_CHUNK_OVERLAP = 100
 
 
 def _merge_splits(splits: list[str], separator: str) -> list[str]:
@@ -33,9 +31,9 @@ def _merge_splits(splits: list[str], separator: str) -> list[str]:
     for split in splits:
         split_len = len(split)
         added_len = split_len + (sep_len if current else 0)
-        if current and current_len + added_len > _CHUNK_SIZE:
+        if current and current_len + added_len > CHUNK_SIZE:
             chunks.append(separator.join(current))
-            while current and current_len > _CHUNK_OVERLAP:
+            while current and current_len > CHUNK_OVERLAP:
                 dropped = len(current[0]) + (sep_len if len(current) > 1 else 0)
                 current_len -= dropped
                 current.pop(0)
@@ -62,7 +60,7 @@ def _recursive_split(text: str, separators: list[str]) -> list[str]:
     result: list[str] = []
 
     for part in parts:
-        if len(part) > _CHUNK_SIZE:
+        if len(part) > CHUNK_SIZE:
             if good:
                 result.extend(_merge_splits(good, separator))
                 good = []

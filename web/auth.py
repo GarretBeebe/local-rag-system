@@ -1,11 +1,18 @@
-"""Token validation for API key and JWT bearer auth."""
+"""Token creation and validation for API key and JWT bearer auth."""
 
 import hmac
+from datetime import UTC, datetime, timedelta
 
 import jwt as pyjwt
 
-from settings import API_KEY, JWT_SECRET
+from settings import API_KEY, JWT_EXPIRY_HOURS, JWT_SECRET
 from web import user_store
+
+
+def create_token(username: str) -> str:
+    """Create a signed JWT for the given username."""
+    exp = datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS)
+    return pyjwt.encode({"sub": username, "exp": exp}, JWT_SECRET, algorithm="HS256")
 
 
 def is_valid_token(token: str) -> bool:

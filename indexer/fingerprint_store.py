@@ -5,12 +5,11 @@ Tracks which files have been indexed and their content hashes so the watcher
 can skip files that haven't changed since last indexing.
 """
 
-from pathlib import Path
-
 from common.paths import normalize_path
 from common.sqlite_store import SqliteStore
+from settings import DATA_DIR
 
-DB_PATH = Path(__file__).parent.parent / "data" / "fingerprints.sqlite3"
+DB_PATH = DATA_DIR / "fingerprints.sqlite3"
 
 _store = SqliteStore(DB_PATH)
 
