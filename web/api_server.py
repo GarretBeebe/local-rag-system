@@ -20,12 +20,10 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
 import bcrypt as _bcrypt
-import jwt as pyjwt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -42,16 +40,16 @@ from settings import (
     API_KEY,
     CORS_ORIGINS,
     GEN_MODEL,
-    JWT_EXPIRY_HOURS,
     JWT_SECRET,
     RAG_CONCURRENCY_LIMIT,
     RAG_EXECUTOR_WORKERS,
+    RAG_REQUEST_TIMEOUT_SECONDS,
     STREAM_TIMEOUT_SECONDS,
 )
 from web import user_store
-from web.auth import is_valid_token
+from web.auth import create_token, is_valid_token
 from web.openai_compat import build_chat_response, make_stream_chunk, model_entry
-from web.rate_limit import LOGIN_RATE_MAX, _login_rate_buckets, check_rate_limit
+from web.rate_limit import check_login_rate_limit, check_rate_limit
 from web.schemas import (
     ChatRequest,
     LoginRequest,
@@ -64,6 +62,9 @@ logger = logging.getLogger(__name__)
 
 _SERVER_START = int(time.time())
 _WEB_DIR = Path(__file__).parent
+# Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
+# preventing timing-based username enumeration.
+_DUMMY_HASH: bytes = _bcrypt.hashpw(b"__sentinel__", _bcrypt.gensalt())
 
 # Initialized in lifespan after the event loop is running.
 _RAG_EXECUTOR: ThreadPoolExecutor
@@ -113,11 +114,12 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]):
     if request.url.path in ("/", "/favicon.ico") or request.url.path.startswith("/ui"):
         return await call_next(request)
 
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
     if request.url.path == "/auth/login":
-        if not await check_rate_limit(
-            client_ip, buckets=_login_rate_buckets, max_requests=LOGIN_RATE_MAX
-        ):
+        if not await check_login_rate_limit(client_ip):
             return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
         return await call_next(request)
 
@@ -160,7 +162,7 @@ async def _run_rag_with_timeout(
     question: str,
     model: str,
     rag_mode: Literal["strict", "augmented"] = "augmented",
-    timeout: float = 240.0,
+    timeout: float = RAG_REQUEST_TIMEOUT_SECONDS,
 ) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work."""
     loop = asyncio.get_running_loop()
@@ -302,15 +304,14 @@ async def login(credentials: LoginRequest) -> dict[str, str]:
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Web UI login not configured")
     stored = user_store.get_hash(credentials.username)
-    if not stored:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Always run bcrypt to prevent username enumeration via timing differences.
+    hash_to_check = stored.encode() if stored else _DUMMY_HASH
     password_matches = await asyncio.to_thread(
-        _bcrypt.checkpw, credentials.password.encode(), stored.encode()
+        _bcrypt.checkpw, credentials.password.encode(), hash_to_check
     )
-    if not password_matches:
+    if not stored or not password_matches:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    exp = datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS)
-    token = pyjwt.encode({"sub": credentials.username, "exp": exp}, JWT_SECRET, algorithm="HS256")
+    token = create_token(credentials.username)
     return {"token": token}
 
 

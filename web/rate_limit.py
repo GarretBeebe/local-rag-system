@@ -6,7 +6,6 @@ from collections import defaultdict
 
 from settings import RATE_MAX_LOGIN_REQUESTS, RATE_MAX_REQUESTS, RATE_WINDOW_SECONDS
 
-RATE_MAX = RATE_MAX_REQUESTS
 LOGIN_RATE_MAX = RATE_MAX_LOGIN_REQUESTS
 
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
@@ -28,3 +27,8 @@ async def check_rate_limit(
             return False
         buckets[ip].append(now)
         return True
+
+
+async def check_login_rate_limit(ip: str) -> bool:
+    """Return True if the login attempt is within the login rate limit."""
+    return await check_rate_limit(ip, buckets=_login_rate_buckets, max_requests=LOGIN_RATE_MAX)

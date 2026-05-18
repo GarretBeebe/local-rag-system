@@ -5,11 +5,10 @@ Stores bcrypt password hashes keyed by username in data/users.sqlite3,
 which is persisted via the rag-data Docker volume.
 """
 
-from pathlib import Path
-
 from common.sqlite_store import SqliteStore
+from settings import DATA_DIR
 
-DB_PATH = Path(__file__).parent.parent / "data" / "users.sqlite3"
+DB_PATH = DATA_DIR / "users.sqlite3"
 
 _store = SqliteStore(DB_PATH)
 
@@ -28,9 +27,10 @@ def init_db() -> None:
 
 def get_hash(username: str) -> str | None:
     conn = _store.conn
-    row = conn.execute(
-        "SELECT password_hash FROM users WHERE username=?", (username,)
-    ).fetchone()
+    with conn:
+        row = conn.execute(
+            "SELECT password_hash FROM users WHERE username=?", (username,)
+        ).fetchone()
     return row[0] if row else None
 
 
@@ -57,5 +57,6 @@ def delete_user(username: str) -> None:
 
 def list_users() -> list[str]:
     conn = _store.conn
-    rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
+    with conn:
+        rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
     return [row[0] for row in rows]

@@ -15,6 +15,7 @@ from pathlib import Path
 from qdrant_client import QdrantClient
 
 PROJECT_ROOT = Path(__file__).parent
+DATA_DIR = PROJECT_ROOT / "data"
 CONFIG_PATH = Path(
     os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config" / "watcher_config.container.yaml"))
 )
@@ -40,9 +41,9 @@ ALLOW_INSECURE_LOCALONLY = os.environ.get("ALLOW_INSECURE_LOCALONLY", "").lower(
 JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
 _raw_cors_origins = os.environ.get("CORS_ORIGINS", "")
 CORS_ORIGINS = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]
-EMBED_MODEL = "nomic-embed-text"
-GEN_MODEL = "qwen2.5:14b"
-RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
+GEN_MODEL = os.environ.get("GEN_MODEL", "qwen2.5:14b")
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 ALLOWED_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml"}
 
@@ -59,6 +60,7 @@ RATE_WINDOW_SECONDS = float(os.environ.get("RATE_WINDOW_SECONDS", "60.0"))
 RATE_MAX_REQUESTS = int(os.environ.get("RATE_MAX_REQUESTS", "30"))
 RATE_MAX_LOGIN_REQUESTS = int(os.environ.get("RATE_MAX_LOGIN_REQUESTS", "10"))
 STREAM_TIMEOUT_SECONDS = float(os.environ.get("STREAM_TIMEOUT_SECONDS", "120.0"))
+RAG_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("RAG_REQUEST_TIMEOUT_SECONDS", "240.0"))
 
 # Retrieval pipeline
 RECALL_K = int(os.environ.get("RECALL_K", "15"))
@@ -68,6 +70,8 @@ MMR_LAMBDA_MULT = float(os.environ.get("MMR_LAMBDA_MULT", "0.7"))
 KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "300"))
 MAX_CHUNK_CHARS = 2000
 MAX_MD_CHUNK = 2000
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))
+CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 MAX_CHAT_MESSAGES = int(os.environ.get("MAX_CHAT_MESSAGES", "200"))
 MAX_CHAT_CONTENT_ITEMS = int(os.environ.get("MAX_CHAT_CONTENT_ITEMS", "32"))
 MAX_CHAT_MESSAGE_CHARS = int(os.environ.get("MAX_CHAT_MESSAGE_CHARS", "8000"))

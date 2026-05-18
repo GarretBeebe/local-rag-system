@@ -4,7 +4,7 @@ import pytest
 
 # conftest.py patches sentence_transformers and KeywordIndex._build before
 # this module is imported, so api.retrieval loads without side effects.
-from api.retrieval import Chunk, cosine, mmr_select
+from api.retrieval import Chunk, _deduplicate, cosine, mmr_select
 
 
 def _chunk(id: str, vector: list[float], text: str = "") -> Chunk:
@@ -76,17 +76,7 @@ def test_mmr_select_preserves_chunk_data():
     assert result[0].payload["text"] == "hello world"
 
 
-# --- deduplication (inline logic, not calling the full pipeline) ---
-
-def _deduplicate(candidates: list[Chunk]) -> list[Chunk]:
-    seen: set = set()
-    deduped = []
-    for c in candidates:
-        if c.id not in seen:
-            seen.add(c.id)
-            deduped.append(c)
-    return deduped
-
+# --- _deduplicate ---
 
 def test_deduplication_removes_duplicate_ids():
     chunks = [

@@ -35,8 +35,15 @@ logging.basicConfig(
 
 
 def load_config() -> dict:
-    with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f)
+    try:
+        with open(CONFIG_PATH) as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        logging.error("Config file not found: %s", CONFIG_PATH)
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        logging.error("Failed to parse config file %s: %s", CONFIG_PATH, e)
+        sys.exit(1)
 
 
 def sha256_file(path: Path) -> str:
@@ -98,7 +105,7 @@ class WatchHandler(FileSystemEventHandler):
 
     def __init__(self, config: dict, worker: IndexWorker, required_mount_roots: list[Path]):
         self.allowed_ext = set(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
-        self.ignore = config["ignore_patterns"]
+        self.ignore = config.get("ignore_patterns", [])
         self.worker = worker
         self.required_mount_roots = required_mount_roots
 
