@@ -17,5 +17,6 @@ RUN UV_SYSTEM_PYTHON=1 uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN UV_SYSTEM_PYTHON=1 uv sync --frozen --no-dev
 
+ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
