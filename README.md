@@ -117,8 +117,25 @@ The ingestion pipeline supports:
     │   ├── fingerprints.sqlite3
     │   └── users.sqlite3            ← web UI user credentials
     │
+    ├── scripts/
+    │   └── smoke_rag.py             ← end-to-end smoke test (requires live services)
+    │
+    ├── tests/
+    │   ├── conftest.py              ← session-wide mocks for unit tests
+    │   ├── test_auth.py
+    │   ├── test_chunking.py
+    │   ├── test_paths.py
+    │   ├── test_request_validation.py
+    │   ├── test_retrieval.py
+    │   └── integration/
+    │       └── test_reindexing.py   ← requires live Qdrant
+    │
     ├── web/
-    │   ├── api_server.py
+    │   ├── api_server.py            ← app creation, routes, lifespan
+    │   ├── auth.py                  ← token validation (API key + JWT)
+    │   ├── rate_limit.py            ← sliding-window rate limiter
+    │   ├── schemas.py               ← Pydantic request/response models
+    │   ├── openai_compat.py         ← SSE and OpenAI response formatting
     │   ├── user_store.py            ← SQLite-backed user store
     │   └── index.html               ← built-in chat UI
     │
@@ -127,6 +144,8 @@ The ingestion pipeline supports:
     ├── Dockerfile
     ├── docker-compose.yml           ← full stack (Qdrant + API + watcher)
     ├── .dockerignore
+    ├── pyproject.toml
+    ├── uv.lock
     ├── settings.py
     └── README.md
 
@@ -298,19 +317,42 @@ Only `strict` and `augmented` are valid. The server refuses to start if
 
 # Performance Tuning
 
-Two optional environment variables control retrieval behavior and
-instrumentation. Set them in `.env` and restart the `api` container.
+All tuning variables are set in `.env` and take effect after restarting
+the relevant container (`api` or `watcher`).
+
+## Retrieval and observability
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `RAG_TIMING` | `0` | Set to `1` to log per-stage timings (embed, recall, rerank, generate) on every request |
-| `MMR_ENABLED` | `true` | Set to `false` to skip MMR diversification; Qdrant results are returned without vectors, reducing payload size and CPU work |
+| `MMR_ENABLED` | `true` | Set to `false` to skip MMR diversification; reduces payload size and CPU work |
+| `RECALL_K` | `15` | Number of candidates fetched from Qdrant and BM25 before reranking |
+| `MMR_K` | `12` | Number of candidates kept after MMR diversification |
+| `FINAL_K` | `4` | Number of chunks passed to the LLM after reranking |
+| `MMR_LAMBDA_MULT` | `0.7` | MMR trade-off: 1.0 = pure relevance, 0.0 = pure diversity |
+| `KEYWORD_REFRESH_INTERVAL` | `300` | Seconds between BM25 keyword index rebuilds |
 
-Enable timing to identify which pipeline stage dominates latency on your
-hardware:
+Enable timing to identify which pipeline stage dominates latency:
 
     RAG_TIMING=1 docker compose up -d api
     docker compose logs -f api   # look for embed/recall/rerank/generate lines
+
+## API concurrency and rate limiting
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `RAG_EXECUTOR_WORKERS` | `4` | Thread pool size for RAG pipeline execution |
+| `RAG_CONCURRENCY_LIMIT` | `4` | Max simultaneous in-flight RAG requests |
+| `RATE_WINDOW_SECONDS` | `60` | Sliding window duration for rate limiting |
+| `RATE_MAX_REQUESTS` | `30` | Max general API requests per IP per window |
+| `RATE_MAX_LOGIN_REQUESTS` | `10` | Max login attempts per IP per window |
+| `STREAM_TIMEOUT_SECONDS` | `120` | Seconds to wait for each streaming chunk before timing out |
+
+## Ollama generation
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OLLAMA_NUM_CTX` | `16384` | Context window size passed to Ollama for generation |
 
 ------------------------------------------------------------------------
 
@@ -552,6 +594,38 @@ available system memory shared with the GPU is visible to Ollama.
 ------------------------------------------------------------------------
 
 # Developer Guide
+
+## Local Setup
+
+Dependencies are managed with [uv](https://github.com/astral-sh/uv). Install
+it once, then sync the project:
+
+    pip install uv
+    uv sync          # installs runtime deps into .venv
+    uv sync --dev    # also installs pytest, ruff
+
+The Docker image uses the same `uv.lock` for reproducible builds.
+
+## Running Tests
+
+Unit tests run without Qdrant or Ollama:
+
+    .venv/bin/python -m pytest tests/ -m "not integration" -q
+
+Integration tests require a live Qdrant instance (skipped automatically
+if unavailable):
+
+    .venv/bin/python -m pytest tests/ -m integration -q
+
+End-to-end smoke test (requires both Qdrant and Ollama):
+
+    .venv/bin/python scripts/smoke_rag.py
+
+Lint:
+
+    .venv/bin/python -m ruff check .
+
+------------------------------------------------------------------------
 
 ## Adding New Chunking Strategies
 
