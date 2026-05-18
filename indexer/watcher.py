@@ -80,8 +80,13 @@ class IndexWorker:
                 if prev_hash == file_hash:
                     continue
                 logging.info("Indexing %s", path)
-                index_file(p)
-                upsert_hash(path, file_hash)
+                outcome = index_file(p)
+                if outcome == "indexed":
+                    upsert_hash(path, file_hash)
+                elif outcome == "skipped":
+                    logging.info("Skipped %s — fingerprint not updated", path)
+                else:
+                    logging.warning("Failed to index %s — fingerprint not updated", path)
 
             except Exception as e:
                 logging.error("Error indexing %s: %s", path, e)
@@ -104,26 +109,22 @@ class WatchHandler(FileSystemEventHandler):
                 return root
         return None
 
-    def _should_enqueue_file(self, path: str) -> bool:
-        """Return True if the file at path should be processed by the indexer."""
-        return is_indexable_path(path, self.allowed_ext, self.ignore)
-
     def enqueue(self, path: str) -> None:
-        if self._should_enqueue_file(path):
+        if is_indexable_path(path, self.allowed_ext, self.ignore):
             self.worker.submit(normalize_path(path))
 
-    def _handle_file_event(self, event) -> None:
+    def on_created(self, event) -> None:
         if not event.is_directory:
             self.enqueue(event.src_path)
 
-    def on_created(self, event) -> None:
-        self._handle_file_event(event)
-
     def on_modified(self, event) -> None:
-        self._handle_file_event(event)
+        if not event.is_directory:
+            self.enqueue(event.src_path)
 
     def on_deleted(self, event) -> None:
-        if event.is_directory or not self._should_enqueue_file(event.src_path):
+        if event.is_directory or not is_indexable_path(
+            event.src_path, self.allowed_ext, self.ignore
+        ):
             return
         broken_root = self._broken_mount_for(Path(event.src_path))
         if broken_root is not None:

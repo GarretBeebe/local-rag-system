@@ -4,12 +4,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ curl && \
     rm -rf /var/lib/apt/lists/*
 
+RUN pip install --no-cache-dir uv
+
 WORKDIR /app
 
-COPY pyproject.toml .
+# Install dependencies before copying source so this layer is cached unless
+# pyproject.toml or uv.lock change (not on every source edit).
+COPY pyproject.toml uv.lock ./
+RUN UV_SYSTEM_PYTHON=1 uv sync --frozen --no-dev --no-install-project
+
+# Copy source and install the project itself (non-editable).
 COPY . .
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
-RUN pip install --no-cache-dir -e .
+RUN UV_SYSTEM_PYTHON=1 uv sync --frozen --no-dev
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

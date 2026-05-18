@@ -15,6 +15,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from qdrant_client.models import (
     Distance,
@@ -35,7 +36,7 @@ from settings import (
     DOCS_PATH,
     MAX_FILE_SIZE,
     VECTOR_SIZE,
-    qdrant_client,
+    get_qdrant_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,9 +44,9 @@ logger = logging.getLogger(__name__)
 
 @functools.cache
 def ensure_collection() -> None:
-    if not qdrant_client.collection_exists(COLLECTION):
+    if not get_qdrant_client().collection_exists(COLLECTION):
         logger.info("Collection missing — creating new collection")
-        qdrant_client.create_collection(
+        get_qdrant_client().create_collection(
             collection_name=COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
@@ -59,41 +60,41 @@ def load_files() -> list[Path]:
     ]
 
 
-def index_file(path: Path) -> None:
+def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
     ensure_collection()
     normalized_path = normalize_path(path)
 
     if path.stat().st_size > MAX_FILE_SIZE:
         logger.info("Skipping large file: %s", path)
-        return
+        return "skipped"
 
+    t_read = time.monotonic()
     try:
         text = path.read_text(errors="ignore")
+        logger.debug("Read %s with errors='ignore'", path)
     except Exception as e:
         logger.warning("Skipping unreadable file %s: %s", path, e)
-        return
+        return "skipped"
+    t_read = time.monotonic() - t_read
 
+    t_chunk = time.monotonic()
     chunks = chunk_document(path, text)
     chunks = [c.strip() for c in chunks if c and c.strip()]
+    t_chunk = time.monotonic() - t_chunk
 
     if not chunks:
         logger.info("No non-empty chunks for %s", path)
-        return
+        return "skipped"
 
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, normalized_path))
-    start = time.monotonic()
-    points = []
 
+    t_embed = time.monotonic()
+    points = []
     for i, chunk in enumerate(chunks):
         try:
             vec = embed(chunk)
         except Exception as e:
-            logger.warning(
-                "Skipping chunk %s for %s due to embedding failure: %s",
-                i,
-                path,
-                e,
-            )
+            logger.warning("Skipping chunk %s for %s due to embedding failure: %s", i, path, e)
             continue
 
         points.append(
@@ -106,29 +107,56 @@ def index_file(path: Path) -> None:
                     "filename": path.name,
                     "filepath": normalized_path,
                     "chunk_index": i,
-                    "chunk_total": len(chunks),
+                    "chunk_total": 0,  # corrected below once all chunks are embedded
                 },
             )
         )
+    t_embed = time.monotonic() - t_embed
 
     if not points:
         logger.warning("No valid chunks to index for %s", path)
-        return
+        return "failed"
 
-    qdrant_client.upsert(collection_name=COLLECTION, points=points)
-    elapsed = time.monotonic() - start
+    # Correct chunk_total now that we know how many chunks actually embedded.
+    for p in points:
+        p.payload["chunk_total"] = len(points)
+
+    # Prepare-then-swap: all replacement points are ready; now do destructive ops.
+    t_upsert = time.monotonic()
+    try:
+        delete_document(path)
+    except Exception as e:
+        logger.error("Failed to delete existing vectors for %s: %s", path, e)
+        return "failed"
+
+    try:
+        get_qdrant_client().upsert(collection_name=COLLECTION, points=points)
+    except Exception as e:
+        # Delete succeeded but upsert failed: document is absent until next successful re-index.
+        logger.error(
+            "Upsert failed for %s after delete — absent from index until next re-index: %s",
+            path,
+            e,
+        )
+        return "failed"
+    t_upsert = time.monotonic() - t_upsert
+
     logger.info(
-        "Indexed %s with %d chunks in %.2fs",
+        "Indexed %s: %d chunks — read=%.2fs chunk=%.2fs embed=%.2fs upsert=%.2fs",
         path,
         len(points),
-        elapsed,
+        t_read,
+        t_chunk,
+        t_embed,
+        t_upsert,
     )
+    return "indexed"
 
 
 def delete_document(filepath: Path | str) -> None:
     normalized_path = normalize_path(filepath)
     logger.info("Deleting vectors for: %s", normalized_path)
-    qdrant_client.delete(
+    get_qdrant_client().delete(
         collection_name=COLLECTION,
         points_selector=Filter(
             must=[FieldCondition(key="filepath", match=MatchValue(value=normalized_path))]

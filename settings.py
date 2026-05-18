@@ -48,6 +48,24 @@ ALLOWED_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml"}
 
 MAX_FILE_SIZE = 1_000_000
 MAX_EMBED_CHARS = 6000
+
+# Ollama generation
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
+
+# API concurrency and rate limiting
+RAG_EXECUTOR_WORKERS = int(os.environ.get("RAG_EXECUTOR_WORKERS", "4"))
+RAG_CONCURRENCY_LIMIT = int(os.environ.get("RAG_CONCURRENCY_LIMIT", "4"))
+RATE_WINDOW_SECONDS = float(os.environ.get("RATE_WINDOW_SECONDS", "60.0"))
+RATE_MAX_REQUESTS = int(os.environ.get("RATE_MAX_REQUESTS", "30"))
+RATE_MAX_LOGIN_REQUESTS = int(os.environ.get("RATE_MAX_LOGIN_REQUESTS", "10"))
+STREAM_TIMEOUT_SECONDS = float(os.environ.get("STREAM_TIMEOUT_SECONDS", "120.0"))
+
+# Retrieval pipeline
+RECALL_K = int(os.environ.get("RECALL_K", "15"))
+MMR_K = int(os.environ.get("MMR_K", "12"))
+FINAL_K = int(os.environ.get("FINAL_K", "4"))
+MMR_LAMBDA_MULT = float(os.environ.get("MMR_LAMBDA_MULT", "0.7"))
+KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "300"))
 MAX_CHUNK_CHARS = 2000
 MAX_MD_CHUNK = 2000
 MAX_CHAT_MESSAGES = int(os.environ.get("MAX_CHAT_MESSAGES", "200"))
@@ -57,7 +75,15 @@ MAX_CHAT_TOTAL_CHARS = int(os.environ.get("MAX_CHAT_TOTAL_CHARS", "120000"))
 MAX_CHAT_QUESTION_CHARS = int(os.environ.get("MAX_CHAT_QUESTION_CHARS", "12000"))
 MAX_MODEL_NAME_CHARS = int(os.environ.get("MAX_MODEL_NAME_CHARS", "128"))
 
-qdrant_client = QdrantClient(
-    url=f"http://{QDRANT_HOST}:{QDRANT_PORT}",
-    api_key=QDRANT_API_KEY or None,
-)
+_qdrant_client: QdrantClient | None = None
+
+
+def get_qdrant_client() -> QdrantClient:
+    """Return the shared QdrantClient, creating it on first call."""
+    global _qdrant_client
+    if _qdrant_client is None:
+        _qdrant_client = QdrantClient(
+            url=f"http://{QDRANT_HOST}:{QDRANT_PORT}",
+            api_key=QDRANT_API_KEY or None,
+        )
+    return _qdrant_client

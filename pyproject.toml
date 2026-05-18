@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rag-system"
 version = "0.1.0"
+requires-python = ">=3.11"
 dependencies = [
     "qdrant-client",
     "sentence-transformers",
@@ -18,15 +19,37 @@ dependencies = [
     "uvicorn",
     "bcrypt",
     "PyJWT",
+    "torch",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [tool.setuptools]
 py-modules = ["settings"]
 packages = ["api", "common", "ingest", "indexer", "web"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires live Qdrant and Ollama (deselect with -m 'not integration')",
+]
+
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [

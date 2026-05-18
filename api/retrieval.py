@@ -16,20 +16,36 @@ import math
 import re
 import time
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Any, TypeAlias
+from dataclasses import dataclass, field
+from typing import Any
 
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 from sentence_transformers import CrossEncoder
 
 from api.embed import embed
 from api.keyword_index import KeywordIndex
-from indexer.fingerprint_store import list_all_paths
-from settings import COLLECTION, MMR_ENABLED, RAG_TIMING, RERANK_MODEL, qdrant_client
+from settings import (
+    COLLECTION,
+    FINAL_K,
+    MMR_ENABLED,
+    MMR_K,
+    MMR_LAMBDA_MULT,
+    RAG_TIMING,
+    RECALL_K,
+    RERANK_MODEL,
+    get_qdrant_client,
+)
 
 logger = logging.getLogger(__name__)
 
-Chunk: TypeAlias = dict[str, Any]
+
+@dataclass
+class Chunk:
+    id: str | int
+    payload: dict[str, Any]
+    score: float
+    rerank_score: float | None = field(default=None)
+    vector: list[float] | None = field(default=None)
 
 
 @contextmanager
@@ -41,10 +57,30 @@ def timed(label: str):
     yield
     logger.debug("%s: %.3fs", label, time.perf_counter() - t)
 
-reranker = CrossEncoder(RERANK_MODEL, device="cpu")
-keyword_index = KeywordIndex()
+_reranker: CrossEncoder | None = None
+_keyword_index: KeywordIndex | None = None
 
 _FILENAME_RE = re.compile(r"\b([\w.-]+\.[a-zA-Z]{2,5})\b")
+
+
+def startup(rerank_model: str = RERANK_MODEL) -> None:
+    """Load models and start keyword index. Call from the API lifespan, not at import time."""
+    global _reranker, _keyword_index
+    _reranker = CrossEncoder(rerank_model, device="cpu")
+    _keyword_index = KeywordIndex()
+    _keyword_index.start()
+
+
+def _get_reranker() -> CrossEncoder:
+    if _reranker is None:
+        raise RuntimeError("api.retrieval.startup() has not been called")
+    return _reranker
+
+
+def _get_keyword_index() -> KeywordIndex:
+    if _keyword_index is None:
+        raise RuntimeError("api.retrieval.startup() has not been called")
+    return _keyword_index
 
 
 def _extract_filename(question: str) -> str | None:
@@ -53,7 +89,7 @@ def _extract_filename(question: str) -> str | None:
     if not match:
         return None
     candidate = match.group(1)
-    known = {Path(p).name for p in list_all_paths()}
+    known = _get_keyword_index().known_filenames
     if candidate in known:
         return candidate
     close = difflib.get_close_matches(candidate, known, n=1, cutoff=0.75)
@@ -78,18 +114,22 @@ def qdrant_recall(
 ) -> list[Chunk]:
     """Returns candidate chunks; fetches vectors only when needed for MMR."""
     with timed("qdrant_recall"):
-        res = qdrant_client.query_points(
-            collection_name=COLLECTION,
-            query=question_vec,
-            query_filter=query_filter,
-            limit=limit,
-            with_payload=True,
-            with_vectors=with_vectors,
-        )
-        results = [
-            {"id": p.id, "score": p.score, "vector": p.vector, "payload": p.payload}
-            for p in res.points
-        ]
+        try:
+            res = get_qdrant_client().query_points(
+                collection_name=COLLECTION,
+                query=question_vec,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+                with_vectors=with_vectors,
+            )
+            results = [
+                Chunk(id=p.id, score=p.score, vector=p.vector, payload=p.payload)
+                for p in res.points
+            ]
+        except Exception as e:
+            logger.error("Qdrant vector recall failed: %s: %s", type(e).__name__, e)
+            return []
     return results
 
 
@@ -97,7 +137,7 @@ def mmr_select(
     question_vec: list[float],
     candidates: list[Chunk],
     top_n: int = 8,
-    lambda_mult: float = 0.7,
+    lambda_mult: float = MMR_LAMBDA_MULT,
 ) -> list[Chunk]:
     """Select a diverse subset of candidates using Maximal Marginal Relevance.
 
@@ -105,9 +145,9 @@ def mmr_select(
     results without vectors should be filtered out by the caller.
     """
     def mmr_score(c, selected):
-        sim_to_query = cosine(question_vec, c["vector"])
+        sim_to_query = cosine(question_vec, c.vector)
         diversity_penalty = (
-            max(cosine(c["vector"], s["vector"]) for s in selected)
+            max(cosine(c.vector, s.vector) for s in selected)
             if selected else 0.0
         )
         return lambda_mult * sim_to_query - (1.0 - lambda_mult) * diversity_penalty
@@ -129,13 +169,18 @@ def rerank(question: str, candidates: list[Chunk], top_n: int = 4) -> list[Chunk
         return []
 
     with timed("rerank"):
-        pairs = [(question, c["payload"]["text"]) for c in candidates]
-        scores = reranker.predict(pairs)
+        pairs = [(question, c.payload["text"]) for c in candidates]
+        scores = _get_reranker().predict(pairs)
 
+    if len(scores) != len(candidates):
+        logger.warning(
+            "rerank: score count (%d) != candidate count (%d), truncating",
+            len(scores), len(candidates),
+        )
     for c, s in zip(candidates, scores, strict=False):
-        c["rerank_score"] = float(s)
+        c.rerank_score = float(s)
 
-    return sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)[:top_n]
+    return sorted(candidates, key=lambda x: x.rerank_score or 0.0, reverse=True)[:top_n]
 
 
 def hybrid_recall(
@@ -152,12 +197,16 @@ def hybrid_recall(
     vector_results = qdrant_recall(question_vec, limit=limit,
                                    with_vectors=MMR_ENABLED, query_filter=query_filter)
 
-    keyword_results = keyword_index.search(question, limit=limit)
+    try:
+        keyword_results = _get_keyword_index().search(question, limit=limit)
+    except Exception as e:
+        logger.error("BM25 keyword search failed: %s: %s", type(e).__name__, e)
+        keyword_results = []
     if filename:
         keyword_results = [r for r in keyword_results if r["payload"].get("filename") == filename]
 
     keyword_candidates = [
-        {"id": r["id"], "payload": r["payload"], "vector": None, "score": r["bm25_score"]}
+        Chunk(id=r["id"], payload=r["payload"], vector=None, score=r["bm25_score"])
         for r in keyword_results
     ]
 
@@ -166,9 +215,9 @@ def hybrid_recall(
 
 def retrieve_best(
     question: str,
-    recall_k: int = 15,
-    mmr_k: int = 12,
-    final_k: int = 4,
+    recall_k: int = RECALL_K,
+    mmr_k: int = MMR_K,
+    final_k: int = FINAL_K,
 ) -> list[Chunk]:
     """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
     filename = _extract_filename(question)
@@ -183,15 +232,15 @@ def retrieve_best(
         return []
 
     # Dedupe by point id — vector and keyword results can overlap.
-    seen: set[str] = set()
+    seen: set = set()
     deduped = []
     for c in candidates:
-        if c["id"] not in seen:
-            seen.add(c["id"])
+        if c.id not in seen:
+            seen.add(c.id)
             deduped.append(c)
     candidates = deduped
 
-    vector_candidates = [c for c in candidates if c.get("vector") is not None]
+    vector_candidates = [c for c in candidates if c.vector is not None]
 
     if not vector_candidates:
         return rerank(question, candidates, top_n=final_k)
@@ -202,5 +251,5 @@ def retrieve_best(
     else:
         diversified = vector_candidates[:mmr_k]
 
-    merged = diversified + [c for c in candidates if c.get("vector") is None]
+    merged = diversified + [c for c in candidates if c.vector is None]
     return rerank(question, merged, top_n=final_k)

@@ -13,17 +13,14 @@ Run with:
 """
 
 import asyncio
-import hmac
-import json
 import logging
 import threading
 import time
 import uuid
-from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -33,13 +30,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import api.ollama_client as ollama_client
+import api.retrieval
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
-from api.retrieval import rerank
+from api.retrieval import Chunk, rerank
 from settings import (
     ALLOW_INSECURE_LOCALONLY,
     API_KEY,
@@ -47,64 +44,41 @@ from settings import (
     GEN_MODEL,
     JWT_EXPIRY_HOURS,
     JWT_SECRET,
-    MAX_CHAT_CONTENT_ITEMS,
-    MAX_CHAT_MESSAGE_CHARS,
-    MAX_CHAT_MESSAGES,
-    MAX_CHAT_QUESTION_CHARS,
-    MAX_CHAT_TOTAL_CHARS,
-    MAX_MODEL_NAME_CHARS,
-    RAG_MODE,
+    RAG_CONCURRENCY_LIMIT,
+    RAG_EXECUTOR_WORKERS,
+    STREAM_TIMEOUT_SECONDS,
 )
 from web import user_store
+from web.auth import is_valid_token
+from web.openai_compat import build_chat_response, make_stream_chunk, model_entry
+from web.rate_limit import LOGIN_RATE_MAX, _login_rate_buckets, check_rate_limit
+from web.schemas import (
+    ChatRequest,
+    LoginRequest,
+    extract_question_from_messages,
+    resolve_rag_mode,
+    validate_chat_request,
+)
 
 logger = logging.getLogger(__name__)
 
 _SERVER_START = int(time.time())
-_RAG_EXECUTOR = ThreadPoolExecutor(max_workers=4)
-_RAG_CONCURRENCY = asyncio.Semaphore(4)
-
-_RATE_WINDOW = 60.0
-_RATE_MAX = 30
-_LOGIN_RATE_MAX = 10
-_rate_buckets: dict[str, list[float]] = defaultdict(list)
-_login_rate_buckets: dict[str, list[float]] = defaultdict(list)
-_rate_lock = asyncio.Lock()
-
 _WEB_DIR = Path(__file__).parent
 
-
-async def _check_rate_limit(
-    ip: str,
-    *,
-    buckets: dict[str, list[float]] = _rate_buckets,
-    max_requests: int = _RATE_MAX,
-) -> bool:
-    async with _rate_lock:
-        now = time.monotonic()
-        buckets[ip] = [t for t in buckets[ip] if now - t < _RATE_WINDOW]
-        if not buckets[ip]:
-            del buckets[ip]
-        elif len(buckets[ip]) >= max_requests:
-            return False
-        buckets[ip].append(now)
-        return True
-
-
-def _is_valid_token(token: str) -> bool:
-    if API_KEY and hmac.compare_digest(token, API_KEY):
-        return True
-    if JWT_SECRET:
-        try:
-            payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-            return user_store.get_hash(payload.get("sub", "")) is not None
-        except pyjwt.InvalidTokenError:
-            return False
-    return False
+# Initialized in lifespan after the event loop is running.
+_RAG_EXECUTOR: ThreadPoolExecutor
+_RAG_CONCURRENCY: asyncio.Semaphore
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _RAG_EXECUTOR, _RAG_CONCURRENCY
+    _RAG_EXECUTOR = ThreadPoolExecutor(max_workers=RAG_EXECUTOR_WORKERS)
+    _RAG_CONCURRENCY = asyncio.Semaphore(RAG_CONCURRENCY_LIMIT)
+
     user_store.init_db()
+    api.retrieval.startup()
+
     if not API_KEY and not JWT_SECRET:
         if not ALLOW_INSECURE_LOCALONLY:
             raise RuntimeError(
@@ -115,6 +89,7 @@ async def lifespan(app: FastAPI):
             "Authentication is DISABLED for local-only mode because "
             "ALLOW_INSECURE_LOCALONLY=true"
         )
+
     warm_task = asyncio.create_task(_warm_models())
     try:
         yield
@@ -131,36 +106,32 @@ app.mount("/ui", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next: Callable[..., Any]):
-    logger.info("%s %s", request.method, request.url.path)
+    request_id = uuid.uuid4().hex[:12]
+    request.state.request_id = request_id
+    logger.info("[%s] %s %s", request_id, request.method, request.url.path)
 
-    # Health check, favicon, and static UI bypass auth and rate limiting
     if request.url.path in ("/", "/favicon.ico") or request.url.path.startswith("/ui"):
         return await call_next(request)
 
     client_ip = request.client.host if request.client else "unknown"
-    # Login endpoint is rate-limited but does not require a token
     if request.url.path == "/auth/login":
-        if not await _check_rate_limit(
-            client_ip,
-            buckets=_login_rate_buckets,
-            max_requests=_LOGIN_RATE_MAX,
+        if not await check_rate_limit(
+            client_ip, buckets=_login_rate_buckets, max_requests=LOGIN_RATE_MAX
         ):
             return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
         return await call_next(request)
 
-    if not await _check_rate_limit(client_ip):
+    if not await check_rate_limit(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
     if API_KEY or JWT_SECRET:
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        if not _is_valid_token(token):
+        if not is_valid_token(token):
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
     return await call_next(request)
 
 
-# Registered after security_middleware so CORS is the outermost layer —
-# this ensures CORS headers appear on 401/429 responses too.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -185,87 +156,13 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
 app.add_middleware(_SecurityHeadersMiddleware)
 
 
-class LoginRequest(BaseModel):
-    username: str = Field(max_length=128)
-    password: str = Field(max_length=128)
-
-
-class ChatMessage(BaseModel):
-    role: Literal["user", "assistant", "system", "tool"]
-    content: str | list[dict[str, str]]
-
-
-class ChatRequest(BaseModel):
-    model: str = Field(min_length=1, max_length=MAX_MODEL_NAME_CHARS)
-    messages: list[ChatMessage] = Field(min_length=1, max_length=MAX_CHAT_MESSAGES)
-    stream: bool | None = False
-    rag_mode: Literal["strict", "augmented"] | None = None
-
-
-def _resolve_rag_mode(req: ChatRequest) -> Literal["strict", "augmented"]:
-    return req.rag_mode or RAG_MODE
-
-
-def _message_size(content: str | list[dict[str, str]]) -> int:
-    if isinstance(content, str):
-        return len(content)
-    return sum(len(str(v)) for item in content if isinstance(item, dict) for v in item.values())
-
-
-def _validate_chat_request(req: ChatRequest) -> None:
-    total_chars = 0
-    for message in req.messages:
-        size = _message_size(message.content)
-        if size > MAX_CHAT_MESSAGE_CHARS:
-            raise HTTPException(status_code=400, detail="Chat message exceeds size limit")
-        total_chars += size
-        if total_chars > MAX_CHAT_TOTAL_CHARS:
-            raise HTTPException(status_code=400, detail="Chat request exceeds total size limit")
-        if isinstance(message.content, list) and len(message.content) > MAX_CHAT_CONTENT_ITEMS:
-            raise HTTPException(status_code=400, detail="Structured message has too many items")
-
-
-def _extract_question_from_messages(messages: list[ChatMessage]) -> str:
-    """Extract the user question from the last chat message, handling OpenAI formats."""
-    content = messages[-1].content
-
-    if isinstance(content, str):
-        question = content
-    elif isinstance(content, list):
-        # handle OpenAI structured messages
-        question = " ".join(
-            item.get("text", "")
-            for item in content
-            if isinstance(item, dict)
-        )
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported message format")
-
-    question = question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Last message content is empty")
-    if len(question) > MAX_CHAT_QUESTION_CHARS:
-        raise HTTPException(status_code=400, detail="Question exceeds size limit")
-    return question
-
-
 async def _run_rag_with_timeout(
     question: str,
     model: str,
     rag_mode: Literal["strict", "augmented"] = "augmented",
     timeout: float = 240.0,
 ) -> str:
-    """Execute the RAG pipeline with a timeout and bounded in-flight work.
-
-    The semaphore counts in-flight executor tasks, not just requests waiting
-    on them. We therefore:
-
-    - Acquire the semaphore before submitting to the executor.
-    - Attach a done-callback that releases the semaphore when the future
-      actually completes, regardless of who is awaiting it.
-    - On timeout, we *do not* release the semaphore early; the slot only
-      becomes available when the underlying work finishes.
-    """
+    """Execute the RAG pipeline with a timeout and bounded in-flight work."""
     loop = asyncio.get_running_loop()
     await _RAG_CONCURRENCY.acquire()
     future = None
@@ -275,7 +172,7 @@ async def _run_rag_with_timeout(
 
         try:
             answer = await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("RAG pipeline timed out after %.1fs", timeout)
             raise HTTPException(
                 status_code=504,
@@ -285,8 +182,6 @@ async def _run_rag_with_timeout(
             logger.exception("RAG pipeline error")
             raise HTTPException(status_code=500, detail="RAG pipeline error") from e
     except BaseException:
-        # Only release here if we failed before creating the future/callback,
-        # otherwise the done-callback owns releasing the permit.
         if future is None:
             _RAG_CONCURRENCY.release()
         raise
@@ -300,12 +195,7 @@ async def _rag_stream_response(
     rag_mode: Literal["strict", "augmented"] = "augmented",
     http_request: Request | None = None,
 ) -> AsyncIterator[str]:
-    """Bridge ask_stream_sync (sync generator) to an async SSE generator.
-
-    Runs ask_stream_sync in the thread pool and forwards text chunks through
-    an asyncio.Queue so the async event loop can yield them to the client as
-    they arrive from Ollama — giving true time-to-first-token streaming.
-    """
+    """Bridge ask_stream_sync (sync generator) to an async SSE generator."""
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
     request_id = f"chatcmpl-{uuid.uuid4()}"
@@ -339,20 +229,20 @@ async def _rag_stream_response(
 
     try:
         while True:
-            item = await asyncio.wait_for(queue.get(), timeout=120.0)
+            item = await asyncio.wait_for(queue.get(), timeout=STREAM_TIMEOUT_SECONDS)
             if item is None:
                 break
             if isinstance(item, Exception):
                 logger.error("RAG stream error: %s", item)
-                yield _make_stream_chunk(
+                yield make_stream_chunk(
                     request_id, created, model, content="\n\n[Generation error — please retry]"
                 )
                 break
-            yield _make_stream_chunk(request_id, created, model, content=item)
-    except asyncio.TimeoutError:
+            yield make_stream_chunk(request_id, created, model, content=item)
+    except TimeoutError:
         cancel_event.set()
         logger.warning("RAG stream timed out waiting for next chunk")
-        yield _make_stream_chunk(
+        yield make_stream_chunk(
             request_id, created, model, content="\n\n[Error: generation timed out]"
         )
     finally:
@@ -361,58 +251,8 @@ async def _rag_stream_response(
         with suppress(asyncio.CancelledError):
             await disconnect_task
 
-    yield _make_stream_chunk(request_id, created, model, finish_reason="stop")
+    yield make_stream_chunk(request_id, created, model, finish_reason="stop")
     yield "data: [DONE]\n\n"
-
-
-def _make_stream_chunk(
-    request_id: str,
-    created: int,
-    model: str,
-    *,
-    content: str | None = None,
-    finish_reason: str | None = None,
-) -> str:
-    delta: dict[str, str] = {"content": content} if content is not None else {}
-    chunk = {
-        "id": request_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
-    }
-    return f"data: {json.dumps(chunk)}\n\n"
-
-
-def _build_chat_response(answer: str, model: str) -> dict[str, Any]:
-    """Build an OpenAI-compatible chat completion response object."""
-    answer = answer or "No response generated."
-    response = {
-        "id": f"chatcmpl-{uuid.uuid4()}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": answer,
-                },
-                "finish_reason": "stop",
-            }
-        ],
-        "usage": {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        },
-    }
-    return response
-
-
-def _model_entry(model_id: str) -> dict[str, Any]:
-    return {"id": model_id, "object": "model", "created": _SERVER_START, "owned_by": "ollama"}
 
 
 @app.get("/v1/models")
@@ -420,9 +260,9 @@ def models():
     try:
         resp = ollama_client.get("/api/tags", timeout=5.0)
         resp.raise_for_status()
-        data = [_model_entry(m["name"]) for m in resp.json().get("models", [])]
+        data = [model_entry(m["name"], _SERVER_START) for m in resp.json().get("models", [])]
     except Exception:
-        data = [_model_entry(GEN_MODEL)]
+        data = [model_entry(GEN_MODEL, _SERVER_START)]
     return {"object": "list", "data": data}
 
 
@@ -433,9 +273,9 @@ def models_alias():
 
 @app.post("/v1/chat/completions")
 async def chat(request: Request, req: ChatRequest):
-    _validate_chat_request(req)
-    question = _extract_question_from_messages(req.messages)
-    rag_mode = _resolve_rag_mode(req)
+    validate_chat_request(req)
+    question = extract_question_from_messages(req.messages)
+    rag_mode = resolve_rag_mode(req)
 
     if req.stream:
         return StreamingResponse(
@@ -444,7 +284,7 @@ async def chat(request: Request, req: ChatRequest):
         )
 
     answer = await _run_rag_with_timeout(question, req.model, rag_mode)
-    return _build_chat_response(answer, req.model)
+    return build_chat_response(answer, req.model)
 
 
 @app.post("/chat/completions")
@@ -469,7 +309,7 @@ async def login(credentials: LoginRequest) -> dict[str, str]:
     )
     if not password_matches:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    exp = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS)
+    exp = datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS)
     token = pyjwt.encode({"sub": credentials.username, "exp": exp}, JWT_SECRET, algorithm="HS256")
     return {"token": token}
 
@@ -488,6 +328,9 @@ async def _warm_models() -> None:
         _warm_one("LLM", ollama_client.post, "/api/generate",
                   json={"model": GEN_MODEL, "prompt": "warmup", "stream": False}, timeout=60),
         _warm_one("Embedding model", embed, "warmup"),
-        _warm_one("Reranker", rerank, "warmup", [{"payload": {"text": "warmup"}}]),
+        _warm_one(
+            "Reranker", rerank, "warmup",
+            [Chunk(id="warmup", payload={"text": "warmup"}, score=1.0)],
+        ),
     )
     logger.info("All models warmed")

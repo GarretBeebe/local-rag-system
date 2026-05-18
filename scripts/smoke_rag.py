@@ -1,9 +1,11 @@
 """
-Minimal end-to-end smoke test for the RAG pipeline.
+End-to-end smoke test for the RAG pipeline.
 
 Embeds a single hardcoded document, stores it in Qdrant, then runs a
 search query to verify that embedding, storage, and retrieval all work.
-Run this after standing up Qdrant and pulling the embedding model.
+Run this after standing up Qdrant and pulling the embedding model:
+
+    python scripts/smoke_rag.py
 """
 
 import uuid
@@ -12,11 +14,11 @@ from qdrant_client.models import PointStruct
 
 from api.embed import embed
 from ingest.index_documents import ensure_collection
-from settings import COLLECTION, qdrant_client
+from settings import COLLECTION, get_qdrant_client
 
 
 def store_document(text: str) -> None:
-    qdrant_client.upsert(
+    get_qdrant_client().upsert(
         collection_name=COLLECTION,
         points=[
             PointStruct(
@@ -30,7 +32,7 @@ def store_document(text: str) -> None:
 
 def search(query: str) -> None:
     vector = embed(query)
-    results = qdrant_client.query_points(
+    results = get_qdrant_client().query_points(
         collection_name=COLLECTION,
         query=vector,
         limit=3,

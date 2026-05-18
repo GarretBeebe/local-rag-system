@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import api.ollama_client as ollama_client
-from api.retrieval import retrieve_best, timed
+from api.retrieval import Chunk, retrieve_best, timed
 from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
@@ -43,12 +43,12 @@ def _resolve_source(payload: dict[str, Any]) -> str:
 
 def build_prompt(
     question: str,
-    chunks: list[dict[str, Any]],
+    chunks: list[Chunk],
     rag_mode: Literal["strict", "augmented"] = "augmented",
 ) -> str:
     context_blocks = []
     for i, chunk in enumerate(chunks, start=1):
-        p = chunk["payload"]
+        p = chunk.payload
         source = _resolve_source(p)
         chunk_ref = f"{p.get('chunk_index', '?')}/{p.get('chunk_total', '?')}"
         cite = f"[S{i}] {source} (chunk {chunk_ref})"
@@ -82,12 +82,12 @@ Answer:
 """
 
 
-def _format_sources(chunks: list[dict[str, Any]]) -> str:
+def _format_sources(chunks: list[Chunk]) -> str:
     lines = []
     for i, chunk in enumerate(chunks, start=1):
-        p = chunk["payload"]
+        p = chunk.payload
         path = _resolve_source(p)
-        score = chunk.get("rerank_score", 0)
+        score = chunk.rerank_score or 0.0
         lines.append(f"[S{i}] {path} (rerank={score:.4f})")
     joined = "\n".join(lines)
     return f"\n\n---\n\nSources:\n\n{joined}\n"
