@@ -13,6 +13,7 @@ import hashlib
 import logging
 import threading
 import time
+from collections.abc import Generator
 from pathlib import Path
 from queue import Queue
 
@@ -32,7 +33,7 @@ logging.basicConfig(
 )
 
 
-def load_config():
+def load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
 
@@ -89,10 +90,18 @@ class IndexWorker:
 
 class WatchHandler(FileSystemEventHandler):
 
-    def __init__(self, config, worker: IndexWorker):
+    def __init__(self, config: dict, worker: IndexWorker, watch_roots: list[Path]):
         self.allowed_ext = set(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
         self.ignore = config["ignore_patterns"]
         self.worker = worker
+        self.watch_roots = watch_roots
+
+    def _broken_mount_root(self, file_path: Path) -> Path | None:
+        """Return the watch root that appears to be an empty broken mount, or None."""
+        for root in self.watch_roots:
+            if file_path.is_relative_to(root) and not any(root.iterdir()):
+                return root
+        return None
 
     def _should_enqueue_file(self, path: str) -> bool:
         """Return True if the file at path should be processed by the indexer."""
@@ -113,13 +122,22 @@ class WatchHandler(FileSystemEventHandler):
         self._handle_file_event(event)
 
     def on_deleted(self, event) -> None:
-        if not event.is_directory and self._should_enqueue_file(event.src_path):
-            normalized_path = normalize_path(event.src_path)
-            delete_document(normalized_path)
-            delete_hash(normalized_path)
+        if event.is_directory or not self._should_enqueue_file(event.src_path):
+            return
+        broken_root = self._broken_mount_root(Path(event.src_path))
+        if broken_root is not None:
+            logging.warning(
+                "Skipping delete for %s — root %s is empty, likely a broken bind mount. "
+                "Fix the mount and run: docker compose restart watcher",
+                event.src_path, broken_root,
+            )
+            return
+        normalized_path = normalize_path(event.src_path)
+        delete_document(normalized_path)
+        delete_hash(normalized_path)
 
 
-def _iter_watch_paths(watch_paths: list):
+def _iter_watch_paths(watch_paths: list) -> Generator[tuple[dict, Path], None, None]:
     for entry in watch_paths:
         raw_path = Path(entry["path"]).expanduser()
         if not raw_path.exists():
@@ -128,9 +146,25 @@ def _iter_watch_paths(watch_paths: list):
         yield entry, Path(normalize_path(raw_path))
 
 
-def initial_scan(watch_paths: list, handler: WatchHandler) -> None:
+def _build_accessible_roots(watch_path_pairs: list[tuple[dict, Path]]) -> list[Path]:
+    """Return roots that are non-empty; warn and skip roots that look like broken mounts."""
+    accessible = []
+    for _, root in watch_path_pairs:
+        if any(root.iterdir()):
+            accessible.append(root)
+        else:
+            logging.warning(
+                "Mount at %s is empty — skipping stale-entry cleanup for this root. "
+                "Existing index entries preserved. Fix the mount and run: "
+                "docker compose restart watcher",
+                root,
+            )
+    return accessible
+
+
+def initial_scan(watch_path_pairs: list[tuple[dict, Path]], handler: WatchHandler) -> None:
     logging.info("Starting initial scan")
-    for entry, root in _iter_watch_paths(watch_paths):
+    for entry, root in watch_path_pairs:
         pattern = "**/*" if entry.get("recursive", True) else "*"
         for f in root.glob(pattern):
             if f.is_file():
@@ -141,17 +175,19 @@ def main() -> None:
     init_db()
     config = load_config()
     worker = IndexWorker()
-    handler = WatchHandler(config, worker)
 
-    accessible_roots = [path for _, path in _iter_watch_paths(config["watch_paths"])]
+    watch_path_pairs = list(_iter_watch_paths(config["watch_paths"]))
+    all_roots = [path for _, path in watch_path_pairs]
+    accessible_roots = _build_accessible_roots(watch_path_pairs)
+
+    handler = WatchHandler(config, worker, all_roots)
     cleanup_stale(accessible_roots)
-    initial_scan(config["watch_paths"], handler)
+    initial_scan(watch_path_pairs, handler)
 
     observer = PollingObserver(timeout=30)
-    for entry, path in _iter_watch_paths(config["watch_paths"]):
-        recursive = entry.get("recursive", True)
+    for entry, path in watch_path_pairs:
         logging.info("Watching %s", path)
-        observer.schedule(handler, str(path), recursive=recursive)
+        observer.schedule(handler, str(path), recursive=entry.get("recursive", True))
 
     observer.start()
 
