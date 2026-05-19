@@ -1,7 +1,7 @@
 # Priority 3 Implementation Spec
 
 Source findings:
-- `context/improvements/review-backlog/grade-it-findings.md`
+- `context/improvements/review-backlog/GRADE-IT-FINDINGS.md`
 
 This spec covers cleanup and refactor work that should wait until Priority 1 and Priority 2 correctness fixes are complete.
 

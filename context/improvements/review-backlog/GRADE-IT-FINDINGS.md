@@ -77,7 +77,7 @@ Any response legitimately containing the substring `"Answer:"` is silently trunc
 
 In augmented mode, case 2 produces a normal-looking model-only answer with no signal to the user that RAG was unavailable. In strict mode, the behavior is the same as case 1 (returns `_NO_CONTEXT_REPLY`) even though the cause was a backend failure, not absent documents.
 
-**Fix:** Distinguish retrieval failure from empty results with a typed failure signal. Handle strict mode as a service failure, and make augmented mode surface a degraded-answer notice if it falls back to model-only generation. See `context/improvements/retrieval-performance/RETRIEVAL_FAILURE_HANDLING.md` for the detailed design notes. This remains behind the more direct correctness/security findings in the implementation order.
+**Fix:** Distinguish retrieval failure from empty results with a typed failure signal. Handle strict mode as a service failure, and make augmented mode surface a degraded-answer notice if it falls back to model-only generation. See `context/improvements/retrieval-performance/RETRIEVAL-FAILURE-HANDLING.md` for the detailed design notes. This remains behind the more direct correctness/security findings in the implementation order.
 
 ---
 
@@ -271,7 +271,7 @@ The model-list endpoint hardcodes `timeout=5.0`, and warmup hardcodes `timeout=6
 4. Make partial embedding failures either fail the document or renumber stored chunks — `ingest/index_documents.py:75-101`
 5. Move hardcoded operational timeouts into settings — `api/ollama_client.py:64,76`, `api/embed.py:40`, `web/api_server.py:263,330`
 6. Remove import-time logging configuration from cleanup/purge scripts — `ingest/cleanup_stale.py:17`, `ingest/purge_ignored.py:25`
-7. Later design-backed fix: introduce `RetrievalUnavailable`; distinguish retrieval failure from empty results in `_prepare_query()` — `api/retrieval.py:130-132`, `api/query_rag.py:100-104`, `context/improvements/retrieval-performance/RETRIEVAL_FAILURE_HANDLING.md`
+7. Later design-backed fix: introduce `RetrievalUnavailable`; distinguish retrieval failure from empty results in `_prepare_query()` — `api/retrieval.py:130-132`, `api/query_rag.py:100-104`, `context/improvements/retrieval-performance/RETRIEVAL-FAILURE-HANDLING.md`
 
 ### Priority 3 — Cleanup
 

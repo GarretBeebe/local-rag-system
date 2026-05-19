@@ -1,6 +1,6 @@
 # Codebase Maintainability Technical Specification
 
-This document is the implementation-level companion to `CODEBASE_MAINTAINABILITY_PLAN.md` in the same directory.
+This document is the implementation-level companion to `CODEBASE-MAINTAINABILITY-PLAN.md` in the same directory.
 Each phase is grounded in specific file locations and concrete decisions. No code is written here.
 
 ---

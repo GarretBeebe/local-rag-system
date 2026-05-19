@@ -1,8 +1,8 @@
 # Priority 1 Implementation Spec
 
 Source findings:
-- `context/improvements/review-backlog/grade-it-findings.md`
-- `context/improvements/retrieval-performance/RETRIEVAL_FAILURE_HANDLING.md` for later retrieval-failure design only
+- `context/improvements/review-backlog/GRADE-IT-FINDINGS.md`
+- `context/improvements/retrieval-performance/RETRIEVAL-FAILURE-HANDLING.md` for later retrieval-failure design only
 
 This spec covers the first implementation batch. These changes address correctness, security, availability, and data-integrity risks that should be handled before the broader cleanup work.
 

@@ -1,8 +1,8 @@
 # Priority 2 Implementation Spec
 
 Source findings:
-- `context/improvements/review-backlog/grade-it-findings.md`
-- `context/improvements/retrieval-performance/RETRIEVAL_FAILURE_HANDLING.md`
+- `context/improvements/review-backlog/GRADE-IT-FINDINGS.md`
+- `context/improvements/retrieval-performance/RETRIEVAL-FAILURE-HANDLING.md`
 
 This spec covers the second implementation batch: correctness improvements, request semantics, maintainability fixes, and operational configuration cleanup. These should follow the Priority 1 fixes.
 
@@ -318,7 +318,7 @@ Acceptance:
 
 This is intentionally last in Priority 2 because it touches retrieval semantics and response behavior.
 
-Use `context/improvements/retrieval-performance/RETRIEVAL_FAILURE_HANDLING.md` as the detailed design source.
+Use `context/improvements/retrieval-performance/RETRIEVAL-FAILURE-HANDLING.md` as the detailed design source.
 
 High-level requirements:
 
