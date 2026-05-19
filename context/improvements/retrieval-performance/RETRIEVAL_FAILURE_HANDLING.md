@@ -1,6 +1,6 @@
 # Retrieval Failure Handling Design Notes
 
-Extracted from `grade-it-findings.md` so the findings backlog can stay concise while preserving the implementation design for later work.
+Extracted from `context/improvements/review-backlog/grade-it-findings.md` so the findings backlog can stay concise while preserving the implementation design for later work.
 
 ## Problem
 

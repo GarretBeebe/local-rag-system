@@ -5,7 +5,7 @@
 This document covers converting the RAG retrieval pipeline into an **agentic retrieval loop**:
 the LLM decides when to retrieve, what to search for, and whether to retrieve again before
 answering. This is not about adding personal-assistant tools (email, calendar, WebDAV) — that
-is covered in `agent-plan.md`. This is exclusively about making retrieval itself agentic.
+is covered in `AGENT-PLAN.md`. This is exclusively about making retrieval itself agentic.
 
 **Current model:**
 ```
