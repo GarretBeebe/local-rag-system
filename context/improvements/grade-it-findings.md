@@ -1,6 +1,6 @@
 # Code Review Findings (grade-it)
 
-Generated: 2026-05-18
+Last updated: 2026-05-19
 
 ---
 
@@ -21,15 +21,6 @@ Generated: 2026-05-18
 `_upsert_chunks()` deletes existing vectors for a file before the replacement upsert succeeds. If Qdrant accepts the delete and the later upsert fails, the document is absent from the index until a future successful re-index. The comment at `ingest/index_documents.py:114` confirms this data-loss window is known behavior.
 
 **Fix:** Upsert the new document version first, then delete the previous version only after the replacement succeeds. Use a versioned `document_id`, an `active` payload flag, or another staging/swap mechanism so transient upsert failures leave the old index entries serving.
-
----
-
-### Retrieval outage silently degrades into uncited augmented answer
-**File:** `api/retrieval.py:130-132`, `api/query_rag.py:100-104`
-
-`qdrant_recall()` catches every Qdrant exception, logs it, and returns `[]`. In augmented mode, `_prepare_query()` treats empty retrieval as no context and sends the raw user question to the model. That turns an infrastructure outage into a normal-looking non-RAG answer with no explicit degraded-service signal.
-
-**Fix:** Propagate retrieval infrastructure failures as a typed error or return an explicit failure state. API callers should report retrieval failure/degraded service instead of falling back to uncited model-only generation.
 
 ---
 
@@ -73,6 +64,20 @@ if "Answer:" in answer:
 Any response legitimately containing the substring `"Answer:"` is silently truncated. Models that don't echo prompts produce clean output and this branch never fires. Models that do echo the full prompt template would echo the entire preamble, not just `"Answer:"`. The heuristic is both lossy for non-echoing models and insufficient for echoing ones.
 
 **Fix:** Remove this stripping entirely, or detect a full prompt echo by checking for the full prompt prefix instead of splitting on a common substring.
+
+---
+
+### Retrieval outage silently degrades into uncited augmented answer
+**File:** `api/retrieval.py:130-132`, `api/query_rag.py:100-104`
+
+`qdrant_recall()` catches every Qdrant exception, logs it, and returns `[]`. Downstream, `_prepare_query()` cannot distinguish between two fundamentally different situations that both produce an empty candidate list:
+
+1. **Qdrant searched successfully and found nothing** — legitimate empty result; augmented fallback is correct behavior
+2. **Qdrant threw an exception** — infrastructure failure; falling back silently masks the outage
+
+In augmented mode, case 2 produces a normal-looking model-only answer with no signal to the user that RAG was unavailable. In strict mode, the behavior is the same as case 1 (returns `_NO_CONTEXT_REPLY`) even though the cause was a backend failure, not absent documents.
+
+**Fix:** Distinguish retrieval failure from empty results with a typed failure signal. Handle strict mode as a service failure, and make augmented mode surface a degraded-answer notice if it falls back to model-only generation. See `context/improvements/RETRIEVAL_FAILURE_HANDLING.md` for the detailed design notes. This remains behind the more direct correctness/security findings in the implementation order.
 
 ---
 
@@ -254,10 +259,9 @@ The model-list endpoint hardcodes `timeout=5.0`, and warmup hardcodes `timeout=6
 
 1. Fix streaming semaphore release on executor scheduling failure — `web/api_server.py:216-218`
 2. Stop deleting old vectors before replacement upsert succeeds — `ingest/index_documents.py:104-119`
-3. Propagate retrieval infrastructure failures instead of silently falling back to model-only answers — `api/retrieval.py:130-132`, `api/query_rag.py:100-104`
-4. Stop trusting arbitrary `X-Forwarded-For` for rate-limit identity — `web/api_server.py:117-120`
-5. Make collection reset clear or invalidate fingerprint state — `ingest/reset_collection.py:11-15`
-6. Make `purge_ignored --apply` fail closed when no watch roots are accessible — `ingest/purge_ignored.py:49-62`
+3. Stop trusting arbitrary `X-Forwarded-For` for rate-limit identity — `web/api_server.py:117-120`
+4. Make collection reset clear or invalidate fingerprint state — `ingest/reset_collection.py:11-15`
+5. Make `purge_ignored --apply` fail closed when no watch roots are accessible — `ingest/purge_ignored.py:49-62`
 
 ### Priority 2 — Should Fix Next
 
@@ -267,6 +271,7 @@ The model-list endpoint hardcodes `timeout=5.0`, and warmup hardcodes `timeout=6
 4. Make partial embedding failures either fail the document or renumber stored chunks — `ingest/index_documents.py:75-101`
 5. Move hardcoded operational timeouts into settings — `api/ollama_client.py:64,76`, `api/embed.py:40`, `web/api_server.py:263,330`
 6. Remove import-time logging configuration from cleanup/purge scripts — `ingest/cleanup_stale.py:17`, `ingest/purge_ignored.py:25`
+7. Later design-backed fix: introduce `RetrievalUnavailable`; distinguish retrieval failure from empty results in `_prepare_query()` — `api/retrieval.py:130-132`, `api/query_rag.py:100-104`, `context/improvements/RETRIEVAL_FAILURE_HANDLING.md`
 
 ### Priority 3 — Cleanup
 
