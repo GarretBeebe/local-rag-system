@@ -1,0 +1,75 @@
+"""Tests proving operational timeout constants reach their HTTP call sites."""
+
+from unittest.mock import MagicMock
+
+
+def test_embed_passes_configured_timeout_to_http_call(monkeypatch):
+    """embed() must forward OLLAMA_EMBED_TIMEOUT_SECONDS to the Ollama HTTP call."""
+    from api.embed import embed
+    from settings import OLLAMA_EMBED_TIMEOUT_SECONDS
+
+    captured = {}
+
+    def fake_post(path, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"embedding": [0.1] * 768}
+        return resp
+
+    monkeypatch.setattr("api.embed.ollama_client.post", fake_post)
+    embed("hello world")
+    assert captured["timeout"] == OLLAMA_EMBED_TIMEOUT_SECONDS
+
+
+def test_generate_passes_configured_timeout_to_http_call(monkeypatch):
+    """generate() must forward OLLAMA_GENERATE_TIMEOUT_SECONDS to the Ollama HTTP call."""
+    from api import ollama_client
+    from settings import OLLAMA_GENERATE_TIMEOUT_SECONDS
+
+    captured = {}
+
+    def fake_post_with_retry(path, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        resp = MagicMock()
+        resp.ok = True
+        resp.json.return_value = {"response": "ok"}
+        return resp
+
+    monkeypatch.setattr("api.ollama_client._post_with_retry", fake_post_with_retry)
+    ollama_client.generate("test prompt", "test-model")
+    assert captured["timeout"] == OLLAMA_GENERATE_TIMEOUT_SECONDS
+
+
+def test_models_endpoint_passes_configured_timeout(monkeypatch):
+    """models() must forward OLLAMA_MODEL_LIST_TIMEOUT_SECONDS to the Ollama HTTP call."""
+    import web.api_server as srv
+    from settings import OLLAMA_MODEL_LIST_TIMEOUT_SECONDS
+
+    captured = {}
+
+    def fake_get(path, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        raise RuntimeError("suppressed by models() try/except")
+
+    monkeypatch.setattr(srv.ollama_client, "get", fake_get)
+    srv.models()  # exception caught internally; function returns fallback
+    assert captured.get("timeout") == OLLAMA_MODEL_LIST_TIMEOUT_SECONDS
+
+
+def test_warm_models_passes_configured_timeout(monkeypatch):
+    """_warm_models() must forward OLLAMA_WARMUP_TIMEOUT_SECONDS to the LLM warmup call."""
+    import asyncio
+    import web.api_server as srv
+    from settings import OLLAMA_WARMUP_TIMEOUT_SECONDS
+
+    captured = {}
+
+    def fake_post(path, **kwargs):
+        if path == "/api/generate":
+            captured["timeout"] = kwargs.get("timeout")
+        raise RuntimeError("suppressed by _warm_one try/except")
+
+    monkeypatch.setattr(srv.ollama_client, "post", fake_post)
+    asyncio.run(srv._warm_models())
+    assert captured.get("timeout") == OLLAMA_WARMUP_TIMEOUT_SECONDS

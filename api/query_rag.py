@@ -21,12 +21,18 @@ from pathlib import Path
 from typing import Any, Literal
 
 import api.ollama_client as ollama_client
-from api.retrieval import Chunk, retrieve_best, timed
+from api.retrieval import Chunk, RetrievalUnavailable, retrieve_best, timed
 from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
 
 _NO_CONTEXT_REPLY = "No relevant context found in the vector store yet."
+_RETRIEVAL_UNAVAILABLE_STRICT = (
+    "Retrieval service is unavailable. Cannot answer in strict mode."
+)
+_RETRIEVAL_UNAVAILABLE_NOTICE = (
+    "\n\n---\n\n*Retrieval unavailable — answer from model knowledge only.*"
+)
 
 
 @dataclass(frozen=True)
@@ -97,7 +103,12 @@ def _prepare_query(
     question: str,
     rag_mode: Literal["strict", "augmented"] = "augmented",
 ) -> _PreparedQuery:
-    chunks = retrieve_best(question)
+    try:
+        chunks = retrieve_best(question)
+    except RetrievalUnavailable:
+        if rag_mode == "strict":
+            return _PreparedQuery(prompt=None, direct_reply=_RETRIEVAL_UNAVAILABLE_STRICT)
+        return _PreparedQuery(prompt=question, sources=_RETRIEVAL_UNAVAILABLE_NOTICE)
     if not chunks:
         if rag_mode == "augmented":
             return _PreparedQuery(prompt=question)

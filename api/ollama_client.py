@@ -10,7 +10,7 @@ from typing import Any
 import requests
 from requests import RequestException
 
-from settings import OLLAMA_BASE_URL, OLLAMA_NUM_CTX
+from settings import OLLAMA_BASE_URL, OLLAMA_GENERATE_TIMEOUT_SECONDS, OLLAMA_NUM_CTX
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def _generate_payload(model: str, prompt: str, *, stream: bool) -> dict[str, Any
     }
 
 
-def generate(prompt: str, model: str, timeout: float = 120.0) -> str:
+def generate(prompt: str, model: str, timeout: float = OLLAMA_GENERATE_TIMEOUT_SECONDS) -> str:
     """Return a complete generated response from Ollama."""
     r = _post_with_retry(
         "/api/generate", json=_generate_payload(model, prompt, stream=False), timeout=timeout
@@ -72,7 +72,7 @@ def generate(prompt: str, model: str, timeout: float = 120.0) -> str:
 def stream_generate(
     prompt: str,
     model: str,
-    timeout: float = 120.0,
+    timeout: float = OLLAMA_GENERATE_TIMEOUT_SECONDS,
     cancel: threading.Event | None = None,
 ) -> Iterator[str]:
     """Yield text chunks from Ollama's streaming generation API."""

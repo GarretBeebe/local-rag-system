@@ -153,3 +153,26 @@ def test_extract_question_empty_raises():
 def test_extract_question_too_long_raises():
     with pytest.raises(HTTPException):
         _extract_question_from_messages([_msg("x" * (MAX_CHAT_QUESTION_CHARS + 1))])
+
+
+def test_extract_question_skips_trailing_assistant_message():
+    msgs = [_msg("what is RAG?"), _msg("it is a pipeline", role="assistant")]
+    assert _extract_question_from_messages(msgs) == "what is RAG?"
+
+
+def test_extract_question_picks_last_user_among_multiple():
+    msgs = [_msg("first"), _msg("reply", role="assistant"), _msg("third")]
+    assert _extract_question_from_messages(msgs) == "third"
+
+
+def test_extract_question_no_user_message_raises_400():
+    msgs = [_msg("response", role="assistant")]
+    with pytest.raises(HTTPException) as exc_info:
+        _extract_question_from_messages(msgs)
+    assert exc_info.value.status_code == 400
+
+
+def test_extract_question_empty_latest_user_message_raises_even_with_prior_content():
+    msgs = [_msg("earlier question"), _msg("   ")]
+    with pytest.raises(HTTPException):
+        _extract_question_from_messages(msgs)

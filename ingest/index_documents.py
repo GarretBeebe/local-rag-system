@@ -77,11 +77,7 @@ def _embed_chunks(path: Path, chunks: list[str], document_id: str) -> list[Point
     points = []
     normalized = normalize_path(path)
     for i, chunk in enumerate(chunks):
-        try:
-            vec = embed(chunk)
-        except Exception as e:
-            logger.warning("Skipping chunk %s for %s due to embedding failure: %s", i, path, e)
-            continue
+        vec = embed(chunk)
         points.append(
             PointStruct(
                 id=str(uuid.uuid4()),
@@ -152,7 +148,11 @@ def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, normalized_path))
 
     t_embed = time.monotonic()
-    points = _embed_chunks(path, chunks, document_id)
+    try:
+        points = _embed_chunks(path, chunks, document_id)
+    except Exception as e:
+        logger.error("Embedding failed for %s: %s", path, e)
+        return "failed"
     t_embed = time.monotonic() - t_embed
 
     if not points:
