@@ -16,7 +16,7 @@ import logging
 from requests import RequestException
 
 import api.ollama_client as ollama_client
-from settings import EMBED_MODEL, MAX_EMBED_CHARS
+from settings import EMBED_MODEL, MAX_EMBED_CHARS, OLLAMA_EMBED_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def embed(text: str) -> list[float]:
         response = ollama_client.post(
             "/api/embeddings",
             json={"model": EMBED_MODEL, "prompt": text},
-            timeout=60,
+            timeout=OLLAMA_EMBED_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
     except RequestException as e:

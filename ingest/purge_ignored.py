@@ -23,7 +23,6 @@ from indexer.fingerprint_store import delete_hash, init_db, list_all_paths
 from ingest.index_documents import delete_document
 from settings import ALLOWED_EXTENSIONS, CONFIG_PATH
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -103,6 +102,7 @@ def purge_ignored(config_path: Path, *, apply: bool) -> int:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",

@@ -39,6 +39,10 @@ from settings import (
 logger = logging.getLogger(__name__)
 
 
+class RetrievalUnavailable(Exception):
+    """Raised when the vector store is unreachable or returns an infrastructure error."""
+
+
 @dataclass
 class Chunk:
     id: str | int
@@ -129,7 +133,7 @@ def qdrant_recall(
             ]
         except Exception as e:
             logger.error("Qdrant vector recall failed: %s: %s", type(e).__name__, e)
-            return []
+            raise RetrievalUnavailable(str(e)) from e
     return results
 
 

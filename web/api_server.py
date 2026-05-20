@@ -42,6 +42,8 @@ from settings import (
     CORS_ORIGINS,
     GEN_MODEL,
     JWT_SECRET,
+    OLLAMA_MODEL_LIST_TIMEOUT_SECONDS,
+    OLLAMA_WARMUP_TIMEOUT_SECONDS,
     RAG_CONCURRENCY_LIMIT,
     RAG_EXECUTOR_WORKERS,
     RAG_REQUEST_TIMEOUT_SECONDS,
@@ -83,8 +85,20 @@ def resolve_client_ip(request: Request) -> str:
 
 
 # Initialized in lifespan after the event loop is running.
-_RAG_EXECUTOR: ThreadPoolExecutor
-_RAG_CONCURRENCY: asyncio.Semaphore
+_RAG_EXECUTOR: ThreadPoolExecutor | None = None
+_RAG_CONCURRENCY: asyncio.Semaphore | None = None
+
+
+def _get_rag_executor() -> ThreadPoolExecutor:
+    if _RAG_EXECUTOR is None:
+        raise RuntimeError("RAG executor has not been initialized — lifespan not started")
+    return _RAG_EXECUTOR
+
+
+def _get_rag_concurrency() -> asyncio.Semaphore:
+    if _RAG_CONCURRENCY is None:
+        raise RuntimeError("RAG concurrency limiter has not been initialized — lifespan not started")
+    return _RAG_CONCURRENCY
 
 
 @asynccontextmanager
@@ -114,7 +128,7 @@ async def lifespan(app: FastAPI):
         warm_task.cancel()
         with suppress(asyncio.CancelledError):
             await warm_task
-        _RAG_EXECUTOR.shutdown(wait=False)
+        _get_rag_executor().shutdown(wait=False)
 
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
@@ -178,15 +192,30 @@ async def _run_rag_with_timeout(
     timeout: float = RAG_REQUEST_TIMEOUT_SECONDS,
 ) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work."""
+    semaphore = _get_rag_concurrency()
     loop = asyncio.get_running_loop()
-    await _RAG_CONCURRENCY.acquire()
+    started = time.monotonic()
+    try:
+        await asyncio.wait_for(semaphore.acquire(), timeout=timeout)
+    except TimeoutError:
+        logger.warning("RAG pipeline timed out waiting for capacity after %.1fs", timeout)
+        raise HTTPException(
+            status_code=504,
+            detail="RAG pipeline timed out waiting for capacity.",
+        ) from None
     future = None
     try:
-        future = loop.run_in_executor(_RAG_EXECUTOR, ask, question, model, rag_mode)
-        future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=504,
+                detail="RAG pipeline timed out waiting for capacity.",
+            ) from None
+        future = loop.run_in_executor(_get_rag_executor(), ask, question, model, rag_mode)
+        future.add_done_callback(lambda _f: semaphore.release())
 
         try:
-            answer = await asyncio.wait_for(future, timeout=timeout)
+            answer = await asyncio.wait_for(future, timeout=remaining)
         except TimeoutError:
             logger.warning("RAG pipeline timed out after %.1fs", timeout)
             raise HTTPException(
@@ -198,7 +227,7 @@ async def _run_rag_with_timeout(
             raise HTTPException(status_code=500, detail="RAG pipeline error") from e
     except BaseException:
         if future is None:
-            _RAG_CONCURRENCY.release()
+            semaphore.release()
         raise
 
     return str(answer or "").strip()
@@ -226,14 +255,24 @@ async def _rag_stream_response(
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
-    await _RAG_CONCURRENCY.acquire()
+    semaphore = _get_rag_concurrency()
+    try:
+        await asyncio.wait_for(semaphore.acquire(), timeout=RAG_REQUEST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("RAG stream timed out waiting for capacity")
+        yield make_stream_chunk(
+            request_id, created, model, content="\n\n[Error: server at capacity, please retry]"
+        )
+        yield make_stream_chunk(request_id, created, model, finish_reason="stop")
+        yield "data: [DONE]\n\n"
+        return
     future = None
     try:
-        future = loop.run_in_executor(_RAG_EXECUTOR, _run)
-        future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
+        future = loop.run_in_executor(_get_rag_executor(), _run)
+        future.add_done_callback(lambda _f: semaphore.release())
     except BaseException:
         if future is None:
-            _RAG_CONCURRENCY.release()
+            semaphore.release()
         raise
 
     async def _watch_disconnect():
@@ -279,7 +318,7 @@ async def _rag_stream_response(
 @app.get("/v1/models")
 def models():
     try:
-        resp = ollama_client.get("/api/tags", timeout=5.0)
+        resp = ollama_client.get("/api/tags", timeout=OLLAMA_MODEL_LIST_TIMEOUT_SECONDS)
         resp.raise_for_status()
         data = [model_entry(m["name"], _SERVER_START) for m in resp.json().get("models", [])]
     except Exception:
@@ -346,7 +385,7 @@ async def _warm_models() -> None:
     logger.info("Warming RAG models...")
     await asyncio.gather(
         _warm_one("LLM", ollama_client.post, "/api/generate",
-                  json={"model": GEN_MODEL, "prompt": "warmup", "stream": False}, timeout=60),
+                  json={"model": GEN_MODEL, "prompt": "warmup", "stream": False}, timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS),
         _warm_one("Embedding model", embed, "warmup"),
         _warm_one(
             "Reranker", rerank, "warmup",

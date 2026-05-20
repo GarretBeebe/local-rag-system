@@ -109,3 +109,42 @@ def test_chunk_document_case_insensitive_extension():
     code = "def f():\n    pass\n"
     chunks = chunk_document(Path("mod.PY"), code)
     assert any("def f" in c for c in chunks)
+
+
+# --- Module-level code preservation ---
+
+def test_chunk_python_imports_only_are_present():
+    code = "import os\nimport sys\n"
+    chunks = chunk_python(code)
+    assert chunks
+    assert any("import os" in c or "import sys" in c for c in chunks)
+
+
+def test_chunk_python_imports_before_function_both_present():
+    code = "import os\n\ndef foo():\n    return os.getcwd()\n"
+    chunks = chunk_python(code)
+    assert any("import os" in c for c in chunks)
+    assert any("def foo" in c for c in chunks)
+
+
+def test_chunk_python_code_between_functions_is_present():
+    code = "def foo():\n    pass\n\nX = 42\n\ndef bar():\n    pass\n"
+    chunks = chunk_python(code)
+    assert any("X = 42" in c for c in chunks)
+    assert any("def foo" in c for c in chunks)
+    assert any("def bar" in c for c in chunks)
+
+
+def test_chunk_python_main_guard_is_present():
+    code = "def run():\n    pass\n\nif __name__ == '__main__':\n    run()\n"
+    chunks = chunk_python(code)
+    assert any("__main__" in c for c in chunks)
+
+
+def test_chunk_python_source_order_preserved():
+    code = "CONST = 1\n\ndef foo():\n    pass\n\nSECOND = 2\n"
+    chunks = chunk_python(code)
+    const_idx = next(i for i, c in enumerate(chunks) if "CONST" in c)
+    foo_idx = next(i for i, c in enumerate(chunks) if "def foo" in c)
+    second_idx = next(i for i, c in enumerate(chunks) if "SECOND" in c)
+    assert const_idx < foo_idx < second_idx

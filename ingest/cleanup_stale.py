@@ -14,7 +14,7 @@ from pathlib import Path
 from indexer.fingerprint_store import delete_hash, init_db, list_all_paths
 from ingest.index_documents import delete_document
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
@@ -34,14 +34,15 @@ def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
         ):
             continue
         if not p.exists():
-            logging.info("Removing stale entry: %s", filepath)
+            logger.info("Removing stale entry: %s", filepath)
             delete_document(filepath)
             delete_hash(filepath)
             removed += 1
-    logging.info("Cleanup complete — removed %d stale entries", removed)
+    logger.info("Cleanup complete — removed %d stale entries", removed)
     return removed
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     init_db()
     cleanup_stale()

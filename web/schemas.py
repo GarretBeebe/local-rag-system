@@ -57,8 +57,13 @@ def validate_chat_request(req: ChatRequest) -> None:
 
 
 def extract_question_from_messages(messages: list[ChatMessage]) -> str:
-    """Extract the user question from the last chat message, handling OpenAI formats."""
-    content = messages[-1].content
+    """Extract the user question from the latest user message, handling OpenAI formats."""
+    for message in reversed(messages):
+        if message.role == "user":
+            content = message.content
+            break
+    else:
+        raise HTTPException(status_code=400, detail="Chat request must include a user message")
 
     if isinstance(content, str):
         question = content
@@ -71,7 +76,7 @@ def extract_question_from_messages(messages: list[ChatMessage]) -> str:
 
     question = question.strip()
     if not question:
-        raise HTTPException(status_code=400, detail="Last message content is empty")
+        raise HTTPException(status_code=400, detail="Last user message content is empty")
     if len(question) > MAX_CHAT_QUESTION_CHARS:
         raise HTTPException(status_code=400, detail="Question exceeds size limit")
     return question

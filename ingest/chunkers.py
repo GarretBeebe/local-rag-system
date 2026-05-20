@@ -90,23 +90,38 @@ def chunk_python(text: str) -> list[str]:
     except (SyntaxError, ValueError):
         return chunk_text(text)
 
-    chunks = []
+    lines = text.splitlines(keepends=True)
+    total_lines = len(lines)
+
+    def _span(start: int, end: int) -> str:
+        """Return stripped text for 1-based inclusive line range [start, end]."""
+        return "".join(lines[start - 1:end]).strip()
+
+    def _emit(segment: str, out: list[str]) -> None:
+        if segment:
+            out.extend(chunk_text(segment) if len(segment) > MAX_CHUNK_CHARS else [segment])
+
+    chunks: list[str] = []
+    prev_end = 0
 
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            segment = ast.get_source_segment(text, node)
-            if not segment:
-                continue
-            if len(segment) > MAX_CHUNK_CHARS:
-                chunks.extend(chunk_text(segment))
-            else:
-                chunks.append(segment)
+        # Emit any gap (imports, assignments, comments) before this node.
+        if node.lineno > prev_end + 1:
+            _emit(_span(prev_end + 1, node.lineno - 1), chunks)
 
-    # fallback for scripts with no defs
-    if not chunks:
-        return chunk_text(text)
+        # Emit the node itself.
+        segment = (
+            ast.get_source_segment(text, node)
+            or "".join(lines[node.lineno - 1:node.end_lineno])
+        ).strip()
+        _emit(segment, chunks)
+        prev_end = node.end_lineno
 
-    return chunks
+    # Emit any trailing code after the last node.
+    if prev_end < total_lines:
+        _emit(_span(prev_end + 1, total_lines), chunks)
+
+    return chunks if chunks else chunk_text(text)
 
 
 # -------------------------
