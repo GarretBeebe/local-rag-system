@@ -45,7 +45,7 @@ The codebase is modular and clean. The key pieces are already in place:
 The `retrieve_best()` function signature is already exactly what you'd want as a tool:
 ```python
 # api/retrieval.py
-def retrieve_best(question: str, recall_k=15, mmr_k=12, final_k=4) -> list[ScoredChunk]
+def retrieve_best(question: str, recall_k: int = RECALL_K, mmr_k: int = MMR_K, final_k: int = FINAL_K) -> list[Chunk]
 ```
 Wrap it, expose the `question` parameter to the LLM, return formatted results — done.
 
@@ -86,15 +86,21 @@ def chat(messages: list[dict], tools: list[dict] | None = None, ...) -> dict
 def stream_chat(messages: list[dict], tools: list[dict] | None = None, ...) -> Iterator[dict]
 ```
 
-The `/api/chat` request format:
-```json
-{
-  "model": "qwen2.5:14b",
-  "messages": [...],
-  "tools": [...],
-  "stream": false,
-  "options": { "num_ctx": 16384 }
-}
+Both should route through the existing `_post_with_retry()` (line 30) for 5xx retry handling
+and consistent error raising — do not use raw `_session.post()` for these.
+
+A shared payload builder:
+```python
+def _chat_payload(model: str, messages: list[dict], tools: list[dict] | None, *, stream: bool) -> dict:
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": stream,
+        "options": {"num_ctx": OLLAMA_NUM_CTX},  # from settings — do not hardcode
+    }
+    if tools:
+        payload["tools"] = tools
+    return payload
 ```
 
 Response includes either `message.content` (text) or `message.tool_calls` (list of calls).
@@ -103,9 +109,13 @@ parse tool call JSON). Streaming is re-enabled for the final answer generation.
 
 ### 2. `api/tools.py` — Tool definitions (new file)
 
-Define the retrieval tool schema and execution function:
+Define the retrieval tool schema and execution functions. Two variants are needed:
+`execute_tool` (string only, for the streaming path) and `execute_tool_with_chunks`
+(string + raw chunks, for the non-streaming path that builds a citation list).
 
 ```python
+from api.retrieval import Chunk, retrieve_best
+
 RETRIEVAL_TOOL = {
     "type": "function",
     "function": {
@@ -130,33 +140,64 @@ RETRIEVAL_TOOL = {
     }
 }
 
+TOOLS = [RETRIEVAL_TOOL]
+
+
 def execute_tool(name: str, arguments: dict) -> str:
-    """Execute a tool call and return formatted results as a string."""
+    """Execute a tool call and return formatted results as a string (streaming path)."""
     if name == "retrieve":
         chunks = retrieve_best(arguments["query"])
         return _format_chunks(chunks)
     raise ValueError(f"Unknown tool: {name}")
 
-def _format_chunks(chunks: list[ScoredChunk]) -> str:
+
+def execute_tool_with_chunks(name: str, arguments: dict) -> tuple[str, list[Chunk]]:
+    """Execute a tool call and return (formatted string, raw chunks) for citation tracking."""
+    if name == "retrieve":
+        chunks = retrieve_best(arguments["query"])
+        return _format_chunks(chunks), chunks
+    raise ValueError(f"Unknown tool: {name}")
+
+
+def _format_chunks(chunks: list[Chunk]) -> str:
     """Format retrieved chunks for inclusion in the message stream."""
     parts = []
     for i, chunk in enumerate(chunks, 1):
-        parts.append(
-            f"[{i}] {chunk.filename} (score: {chunk.rerank_score:.3f})\n"
-            f"{chunk.text}"
-        )
+        source = chunk.payload.get("filename", "unknown")
+        score = chunk.rerank_score or 0.0
+        text = chunk.payload.get("text", "")
+        parts.append(f"[{i}] {source} (score: {score:.3f})\n{text}")
     return "\n\n---\n\n".join(parts) if parts else "No relevant documents found."
 ```
+
+Note: `chunk.filename` and `chunk.text` do not exist as direct attributes. Use
+`chunk.payload.get("filename")` and `chunk.payload.get("text")` — the `Chunk` dataclass
+(`api/retrieval.py:47`) stores document fields inside the `payload: dict` field.
 
 No `retrieve_from_file` tool for now — `retrieve_best()` already handles filename detection
 via regex in the query. Adding a second tool increases prompt complexity for marginal gain.
 
 ### 3. `api/agent_loop.py` — Agent loop (new file)
 
-```python
-MAX_ITERATIONS = settings.MAX_AGENT_ITERATIONS  # default 3
+Do not define `_timed()` here — import it from `api.query_rag` (both `api/retrieval.py:56`
+and `api/query_rag.py:33` already define identical copies; use the one in `query_rag`).
 
-def run_agent(question: str, model: str, rag_mode: str) -> tuple[str, list[ScoredChunk]]:
+```python
+from collections.abc import Iterator
+from typing import Literal
+
+import api.ollama_client as ollama_client
+from api.query_rag import _timed
+from api.retrieval import Chunk
+from api.tools import TOOLS, execute_tool, execute_tool_with_chunks
+from settings import MAX_AGENT_ITERATIONS
+
+
+def run_agent(
+    question: str,
+    model: str,
+    rag_mode: Literal["agentic"],
+) -> tuple[str, list[Chunk]]:
     """
     Run the agentic retrieval loop.
     Returns (final_answer, all_retrieved_chunks_for_citations).
@@ -165,10 +206,11 @@ def run_agent(question: str, model: str, rag_mode: str) -> tuple[str, list[Score
         {"role": "system", "content": _build_system_prompt(rag_mode)},
         {"role": "user", "content": question},
     ]
-    all_chunks: list[ScoredChunk] = []
+    all_chunks: list[Chunk] = []
 
-    for iteration in range(MAX_ITERATIONS):
-        response = ollama_client.chat(messages, tools=TOOLS, stream=False)
+    for _ in range(MAX_AGENT_ITERATIONS):
+        with _timed("agent_chat"):
+            response = ollama_client.chat(messages, tools=TOOLS, model=model, stream=False)
         msg = response["message"]
 
         if not msg.get("tool_calls"):
@@ -182,18 +224,19 @@ def run_agent(question: str, model: str, rag_mode: str) -> tuple[str, list[Score
             args = tool_call["function"]["arguments"]
             result, chunks = execute_tool_with_chunks(name, args)
             all_chunks.extend(chunks)
-            messages.append({
-                "role": "tool",
-                "content": result,
-            })
+            messages.append({"role": "tool", "content": result})
 
     # Exhausted iterations — ask for final answer without tools
     messages.append({"role": "user", "content": "Please synthesize your findings and answer now."})
-    final = ollama_client.chat(messages, tools=None, stream=False)
+    final = ollama_client.chat(messages, tools=None, model=model, stream=False)
     return final["message"]["content"], all_chunks
 
 
-def run_agent_stream(question: str, model: str, rag_mode: str) -> Iterator[str]:
+def run_agent_stream(
+    question: str,
+    model: str,
+    rag_mode: Literal["agentic"],
+) -> Iterator[str]:
     """
     Streaming variant. Tool-call rounds are non-streaming (blocking),
     only the final answer token-streams.
@@ -203,13 +246,13 @@ def run_agent_stream(question: str, model: str, rag_mode: str) -> Iterator[str]:
         {"role": "user", "content": question},
     ]
 
-    for iteration in range(MAX_ITERATIONS):
-        response = ollama_client.chat(messages, tools=TOOLS, stream=False)
+    for _ in range(MAX_AGENT_ITERATIONS):
+        response = ollama_client.chat(messages, tools=TOOLS, model=model, stream=False)
         msg = response["message"]
 
         if not msg.get("tool_calls"):
             # Final answer — switch to streaming
-            yield from ollama_client.stream_chat(messages + [msg], tools=None)
+            yield from ollama_client.stream_chat(messages + [msg], tools=None, model=model)
             return
 
         # Execute tools silently (client sees nothing yet)
@@ -222,28 +265,62 @@ def run_agent_stream(question: str, model: str, rag_mode: str) -> Iterator[str]:
 
     # Force final answer
     messages.append({"role": "user", "content": "Please synthesize your findings and answer now."})
-    yield from ollama_client.stream_chat(messages, tools=None)
+    yield from ollama_client.stream_chat(messages, tools=None, model=model)
 ```
 
 ### 4. `api/query_rag.py` — Route agentic mode
 
-The existing `ask()` and `ask_stream_sync()` functions gate on `rag_mode`. Add a branch:
+The current code uses `_prepare_query()` + `_PreparedQuery` as an internal abstraction
+(added in the priority-two pass). The agentic path bypasses `_prepare_query()` entirely —
+it doesn't build a static prompt — so the branch must go at the **top** of `ask()` and
+`ask_stream_sync()`, before `_prepare_query()` is called:
 
 ```python
-def ask(question: str, model: str, rag_mode: str) -> str:
+def ask(
+    question: str,
+    model: str,
+    rag_mode: Literal["strict", "augmented", "agentic"] = "augmented",
+) -> str:
     if rag_mode == "agentic":
         answer, chunks = run_agent(question, model, rag_mode)
-        return _format_with_sources(answer, chunks)
-    # ... existing strict/augmented path unchanged
+        return answer + _format_sources(chunks)
+    # existing _prepare_query() path unchanged below
+    prepared = _prepare_query(question, rag_mode)
+    ...
 ```
+
+`_format_sources()` already exists in `query_rag.py` and accepts `list[Chunk]` — reuse it.
 
 The existing `strict`/`augmented` paths are untouched.
 
-### 5. `settings.py` — One new constant
+### 5. `settings.py` — One new constant + update RAG_MODE validation
 
+Add the constant:
 ```python
 MAX_AGENT_ITERATIONS: int = int(os.environ.get("MAX_AGENT_ITERATIONS", "3"))
 ```
+
+Also update the `RAG_MODE` validation guard (lines 34–35), which currently hard-errors
+on anything outside `("strict", "augmented")`. Add `"agentic"` to the allowed set:
+```python
+if RAG_MODE not in ("strict", "augmented", "agentic"):
+    raise ValueError(f"settings: RAG_MODE must be 'strict', 'augmented', or 'agentic', got {RAG_MODE!r}")
+```
+
+### 6. `web/schemas.py` — Expand rag_mode type
+
+`ChatRequest.rag_mode` is currently typed as `Literal["strict", "augmented"] | None` (line 33).
+`resolve_rag_mode()` returns `Literal["strict", "augmented"]` (line 37).
+
+Both need `"agentic"` added:
+```python
+rag_mode: Literal["strict", "augmented", "agentic"] | None = None
+
+def resolve_rag_mode(req: ChatRequest) -> Literal["strict", "augmented", "agentic"]:
+    return req.rag_mode or RAG_MODE
+```
+
+Note: `ChatMessage.role` already includes `"tool"` — no change needed there.
 
 ---
 
@@ -289,10 +366,10 @@ def _build_system_prompt(rag_mode: str) -> str:
 
 ## Citation Tracking Across Iterations
 
-Each retrieval round returns `ScoredChunk` objects. The agent loop accumulates all of them
+Each retrieval round returns `Chunk` objects. The agent loop accumulates all of them
 in `all_chunks`. Before returning the final answer, deduplicate by `(filepath, chunk_index)`
-and pass the unique set to `_format_with_sources()`. This means the final citation list
-reflects all documents consulted, not just the last retrieval round.
+and pass the unique set to `_format_sources()` (already in `api/query_rag.py`). This means
+the final citation list reflects all documents consulted, not just the last retrieval round.
 
 ---
 
@@ -316,8 +393,8 @@ Do these incrementally, verifying each step before moving to the next:
 1. **Extend `ollama_client.py`** — add `chat()` method using `/api/chat`; test manually
    with a single message, confirm tool call response shape from qwen2.5:14b
 
-2. **Create `api/tools.py`** — define `RETRIEVAL_TOOL` schema + `execute_tool()`; unit-test
-   tool execution by calling `retrieve_best()` directly
+2. **Create `api/tools.py`** — define `RETRIEVAL_TOOL` schema, `execute_tool()`, and
+   `execute_tool_with_chunks()`; unit-test both by calling `retrieve_best()` directly
 
 3. **Create `api/agent_loop.py`** — implement non-streaming loop first; test end-to-end with
    a multi-hop question that requires two retrieval rounds (e.g., "compare X in doc A vs doc B")
@@ -327,7 +404,9 @@ Do these incrementally, verifying each step before moving to the next:
 
 5. **Add streaming support** — implement `run_agent_stream()`; verify SSE still works in the UI
 
-6. **Add `settings.py` constant** — `MAX_AGENT_ITERATIONS` with env override
+6. **Update `settings.py` and `web/schemas.py`** — add `MAX_AGENT_ITERATIONS` constant;
+   update `RAG_MODE` validation guard to allow `"agentic"`; expand `rag_mode` types in
+   `ChatRequest` and `resolve_rag_mode()`
 
 7. **Evaluate quality vs. latency** — run the same 10 test questions in both agentic and
    augmented mode; compare answer quality and wall-clock time on the NUCbox
