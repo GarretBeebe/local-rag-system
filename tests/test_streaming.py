@@ -2,17 +2,19 @@
 
 import asyncio
 import threading
+import types
+from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 
 
-async def _collect(gen):
-    items = []
+async def _collect(gen: AsyncIterator[str]) -> list[str]:
+    items: list[str] = []
     async for item in gen:
         items.append(item)
     return items
 
 
-def _setup_server(monkeypatch):
+def _setup_server(monkeypatch) -> tuple[types.ModuleType, asyncio.Semaphore, ThreadPoolExecutor]:
     import web.api_server as srv
 
     sem = asyncio.Semaphore(10)

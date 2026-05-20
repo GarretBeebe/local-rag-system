@@ -53,13 +53,15 @@ class Chunk:
 
 
 @contextmanager
-def timed(label: str):
+def _timed(label: str):
     if not RAG_TIMING:
         yield
         return
-    t = time.perf_counter()
-    yield
-    logger.debug("%s: %.3fs", label, time.perf_counter() - t)
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        logger.debug("%s: %.3fs", label, time.perf_counter() - start)
 
 _reranker: CrossEncoder | None = None
 _keyword_index: KeywordIndex | None = None
@@ -117,7 +119,7 @@ def qdrant_recall(
     query_filter: Filter | None = None,
 ) -> list[Chunk]:
     """Returns candidate chunks; fetches vectors only when needed for MMR."""
-    with timed("qdrant_recall"):
+    with _timed("qdrant_recall"):
         try:
             res = get_qdrant_client().query_points(
                 collection_name=COLLECTION,
@@ -172,7 +174,7 @@ def rerank(question: str, candidates: list[Chunk], top_n: int = 4) -> list[Chunk
     if not candidates:
         return []
 
-    with timed("rerank"):
+    with _timed("rerank"):
         pairs = [(question, c.payload.get("text", "")) for c in candidates]
         scores = _get_reranker().predict(pairs)
 
@@ -237,10 +239,10 @@ def retrieve_best(
     """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
     filename = _extract_filename(question)
 
-    with timed("embed"):
+    with _timed("embed"):
         qvec = embed(question)
 
-    with timed("hybrid_recall"):
+    with _timed("hybrid_recall"):
         candidates = hybrid_recall(question, qvec, limit=recall_k, filename=filename)
 
     if not candidates:
@@ -255,7 +257,7 @@ def retrieve_best(
         return rerank(question, candidates, top_n=final_k)
 
     if MMR_ENABLED:
-        with timed("mmr_select"):
+        with _timed("mmr_select"):
             diversified = mmr_select(qvec, vector_candidates, top_n=mmr_k)
     else:
         diversified = vector_candidates[:mmr_k]

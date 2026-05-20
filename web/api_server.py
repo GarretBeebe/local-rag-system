@@ -137,7 +137,7 @@ app.mount("/ui", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
 
 
 @app.middleware("http")
-async def security_middleware(request: Request, call_next: Callable[..., Any]):
+async def security_middleware(request: Request, call_next: Callable[..., Any]) -> Response:
     request_id = uuid.uuid4().hex[:12]
     request.state.request_id = request_id
     logger.info("[%s] %s %s", request_id, request.method, request.url.path)
