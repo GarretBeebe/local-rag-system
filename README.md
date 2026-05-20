@@ -222,6 +222,11 @@ different origin:
 
     CORS_ORIGINS=https://chat.example.com,https://app.example.com
 
+If the API runs behind a reverse proxy, set `TRUSTED_PROXY_IPS` to the proxy's IP so
+that `X-Forwarded-For` is used for rate-limiting instead of the proxy address:
+
+    TRUSTED_PROXY_IPS=192.168.1.1
+
 ## 2. Pull Ollama models
 
 The embedding model is required. Pull it before starting the stack:
@@ -353,6 +358,11 @@ Enable timing to identify which pipeline stage dominates latency:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `OLLAMA_NUM_CTX` | `16384` | Context window size passed to Ollama for generation |
+| `RAG_REQUEST_TIMEOUT_SECONDS` | `240` | Total time budget for a RAG request (semaphore wait + pipeline + generation) |
+| `OLLAMA_GENERATE_TIMEOUT_SECONDS` | `120` | Timeout for streaming generation calls to Ollama |
+| `OLLAMA_EMBED_TIMEOUT_SECONDS` | `60` | Timeout for embedding calls to Ollama |
+| `OLLAMA_MODEL_LIST_TIMEOUT_SECONDS` | `5` | Timeout for the `/api/tags` model list call |
+| `OLLAMA_WARMUP_TIMEOUT_SECONDS` | `60` | Timeout for the startup warmup call to Ollama |
 
 ------------------------------------------------------------------------
 
@@ -362,18 +372,22 @@ Manual indexing
 
     docker exec rag-api python ingest/index_documents.py
 
-Reset collection
+Reset collection (also clears the fingerprint store so the watcher re-indexes from scratch)
 
     docker exec rag-api python ingest/reset_collection.py
+
+To delete vectors only and leave fingerprints intact:
+
+    docker exec rag-api python ingest/reset_collection.py --vectors-only
 
 ------------------------------------------------------------------------
 
 # Filesystem Watcher
 
-The watcher uses `watchdog`'s `PollingObserver`, which polls the
-filesystem on a 30-second interval. This ensures reliable detection of
-new and modified files on all platforms, including WSL2-mounted Windows
-paths (`/mnt/c/...`) where kernel inotify events are not delivered.
+The watcher uses `watchdog`'s `PollingObserver`, which polls the filesystem on a
+configurable interval (default 30 seconds, set via `WATCHER_POLL_INTERVAL_SECONDS`).
+This ensures reliable detection of new and modified files on all platforms, including
+WSL2-mounted Windows paths (`/mnt/c/...`) where kernel inotify events are not delivered.
 
 The watcher reads `config/watcher_config.container.yaml`, set via the
 `CONFIG_PATH` environment variable in `docker-compose.yml`. Paths use the
@@ -689,6 +703,7 @@ Runtime controls:
 | Web UI auth | Set `JWT_SECRET` in `.env`. Browser users log in with username/password; server issues an 8-hour JWT. Credentials stored as bcrypt hashes in `data/users.sqlite3`. Login returns 503 if `JWT_SECRET` is unset. |
 | Auth disabled local mode | If both `API_KEY` and `JWT_SECRET` are unset, startup fails unless `ALLOW_INSECURE_LOCALONLY=true` is set explicitly. Use only for local development. |
 | Rate limiting | General API requests are limited to 30 requests per minute per IP. `/auth/login` uses a separate tighter 10 attempts per minute per-IP bucket. Returns `429` when exceeded. |
+| Trusted proxy IPs | Set `TRUSTED_PROXY_IPS` (comma-separated) to the IP(s) of your reverse proxy. When set, `X-Forwarded-For` is used to identify the real client IP for rate limiting; unrecognised or malformed values fall back to the peer address. |
 | Security headers | All responses include `Content-Security-Policy`, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`. |
 | XSS protection | LLM output in the web UI is sanitised with DOMPurify before rendering as HTML. `marked.js` and `DOMPurify` are vendored — no CDN dependency. |
 | CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins). Empty by default, which disables cross-origin browser access. |
