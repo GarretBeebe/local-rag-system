@@ -33,6 +33,20 @@ def _count_points(normalized_path: str) -> int:
     return result.count
 
 
+def _point_ids(normalized_path: str) -> set[str]:
+    """Return the set of point IDs whose filepath payload matches normalized_path."""
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+    points, _ = get_qdrant_client().scroll(
+        collection_name=COLLECTION,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="filepath", match=MatchValue(value=normalized_path))]
+        ),
+        with_payload=False,
+        with_vectors=False,
+    )
+    return {str(p.id) for p in points}
+
+
 @pytest.fixture(autouse=True)
 def _ensure_collection():
     from ingest.index_documents import ensure_collection
@@ -122,3 +136,34 @@ def test_skipped_file_does_not_update_fingerprint(tmp_path):
     outcome = index_file(f)
     assert outcome == "skipped"
     assert get_hash(normalized) == prev_hash
+
+
+def test_failed_upsert_leaves_previous_vectors_queryable(tmp_doc, monkeypatch, fake_embed):
+    """A failed replacement upsert must not remove the previously indexed vectors.
+
+    Verifies the exact original point IDs remain — not just the same count, which
+    could be satisfied by a broken replacement that swaps out all old points for
+    the same number of new ones.
+    """
+    from ingest.index_documents import index_file
+
+    tmp_doc.write_text("original content that must stay queryable")
+    index_file(tmp_doc)
+    ids_before = _point_ids(normalize_path(tmp_doc))
+    assert ids_before, "expected at least one indexed point before the failed replacement"
+
+    client = get_qdrant_client()
+
+    def upsert_always_fails(*args, **kwargs):
+        raise RuntimeError("forced upsert failure")
+
+    monkeypatch.setattr(client, "upsert", upsert_always_fails)
+
+    tmp_doc.write_text("replacement content whose upsert will fail")
+    assert index_file(tmp_doc) == "failed"
+
+    # Restore real client methods so scroll() can run normally.
+    monkeypatch.undo()
+    assert _point_ids(normalize_path(tmp_doc)) == ids_before, (
+        "original point IDs must be unchanged after a failed replacement upsert"
+    )

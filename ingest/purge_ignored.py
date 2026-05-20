@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 import yaml
@@ -24,6 +25,10 @@ from settings import ALLOWED_EXTENSIONS, CONFIG_PATH
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+
+class NoAccessibleWatchRootsError(RuntimeError):
+    pass
 
 
 def load_config(path: Path) -> dict:
@@ -49,12 +54,26 @@ def _is_under_roots(path: Path, roots: list[Path]) -> bool:
 def find_ignored_paths(config: dict) -> list[str]:
     allowed_ext = set(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
     ignore_patterns = config.get("ignore_patterns", [])
-    accessible_roots = _iter_accessible_roots(config)
-    ignored = []
+    watch_paths = config.get("watch_paths", [])
 
+    if not watch_paths:
+        raise NoAccessibleWatchRootsError(
+            "No watch_paths configured — refusing to evaluate all tracked paths. "
+            "Add watch_paths to your config to scope the purge."
+        )
+
+    accessible_roots = _iter_accessible_roots(config)
+    if not accessible_roots:
+        configured = [entry["path"] for entry in watch_paths]
+        raise NoAccessibleWatchRootsError(
+            f"No configured watch roots are accessible — refusing to evaluate all tracked paths. "
+            f"Configured roots: {configured}"
+        )
+
+    ignored = []
     for filepath in list_all_paths():
         path = Path(filepath)
-        if accessible_roots and not _is_under_roots(path, accessible_roots):
+        if not _is_under_roots(path, accessible_roots):
             continue
         if not is_indexable_path(path, allowed_ext, ignore_patterns):
             ignored.append(filepath)
@@ -93,7 +112,11 @@ def main() -> None:
     )
     parser.add_argument("--apply", action="store_true", help="Delete matched entries.")
     args = parser.parse_args()
-    purge_ignored(args.config, apply=args.apply)
+    try:
+        purge_ignored(args.config, apply=args.apply)
+    except NoAccessibleWatchRootsError as exc:
+        logger.error("Purge aborted: %s", exc)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
