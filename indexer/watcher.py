@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 from collections.abc import Generator
+from enum import StrEnum
 from pathlib import Path
 from queue import Queue
 
@@ -26,7 +27,7 @@ from common.paths import is_indexable_path, normalize_path
 from indexer.fingerprint_store import delete_hash, get_hash, init_db, upsert_hash
 from ingest.cleanup_stale import cleanup_stale
 from ingest.index_documents import delete_document, index_file
-from settings import ALLOWED_EXTENSIONS, CONFIG_PATH
+from settings import ALLOWED_EXTENSIONS, CONFIG_PATH, WATCHER_POLL_INTERVAL_SECONDS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,10 +49,43 @@ def load_config() -> dict:
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
-    with open(path, "rb") as f:
+    with path.open("rb") as f:
         while chunk := f.read(8192):
             h.update(chunk)
     return h.hexdigest()
+
+
+class IndexDecision(StrEnum):
+    MISSING = "missing"
+    UNCHANGED = "unchanged"
+    INDEXED = "indexed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+def _index_if_changed(path: str) -> IndexDecision:
+    """Check whether a file needs indexing and index it if so."""
+    p = Path(path)
+    if not p.exists():
+        return IndexDecision.MISSING
+    try:
+        file_hash = sha256_file(p)
+        prev_hash = get_hash(path)
+        if prev_hash == file_hash:
+            return IndexDecision.UNCHANGED
+        logging.info("Indexing %s", path)
+        outcome = index_file(p)
+        if outcome == "indexed":
+            upsert_hash(path, file_hash)
+            return IndexDecision.INDEXED
+        if outcome == "skipped":
+            logging.info("Skipped %s — fingerprint not updated", path)
+            return IndexDecision.SKIPPED
+        logging.warning("Failed to index %s — fingerprint not updated", path)
+        return IndexDecision.FAILED
+    except Exception as e:
+        logging.error("Error indexing %s: %s", path, e)
+        return IndexDecision.FAILED
 
 
 class IndexWorker:
@@ -78,25 +112,7 @@ class IndexWorker:
                 self._queue.task_done()
                 break
             try:
-                p = Path(path)
-                if not p.exists():
-                    continue
-
-                file_hash = sha256_file(p)
-                prev_hash = get_hash(path)
-                if prev_hash == file_hash:
-                    continue
-                logging.info("Indexing %s", path)
-                outcome = index_file(p)
-                if outcome == "indexed":
-                    upsert_hash(path, file_hash)
-                elif outcome == "skipped":
-                    logging.info("Skipped %s — fingerprint not updated", path)
-                else:
-                    logging.warning("Failed to index %s — fingerprint not updated", path)
-
-            except Exception as e:
-                logging.error("Error indexing %s: %s", path, e)
+                _index_if_changed(path)
             finally:
                 self._queue.task_done()
 
@@ -201,7 +217,7 @@ def main() -> None:
     cleanup_stale(accessible_roots)
     initial_scan(watch_path_pairs, handler)
 
-    observer = PollingObserver(timeout=30)
+    observer = PollingObserver(timeout=WATCHER_POLL_INTERVAL_SECONDS)
     for entry, path in watch_path_pairs:
         logging.info("Watching %s", path)
         observer.schedule(handler, str(path), recursive=entry.get("recursive", True))

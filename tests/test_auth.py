@@ -110,7 +110,9 @@ def test_is_valid_token_empty_with_api_key(monkeypatch):
 def test_is_valid_token_valid_jwt_known_user(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "")
     monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module.user_store, "get_hash", lambda u: "hash" if u == "alice" else None)
+    monkeypatch.setattr(
+        auth_module.user_store, "get_hash", lambda u: "hash" if u == "alice" else None
+    )
     assert is_valid_token(make_token(secret=SECRET, sub="alice")) is True
 
 
@@ -173,6 +175,8 @@ def test_create_token_is_valid(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "")
     monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
     monkeypatch.setattr(auth_module, "JWT_EXPIRY_HOURS", 8)
-    monkeypatch.setattr(auth_module.user_store, "get_hash", lambda u: "hash" if u == "alice" else None)
+    monkeypatch.setattr(
+        auth_module.user_store, "get_hash", lambda u: "hash" if u == "alice" else None
+    )
     token = create_token("alice")
     assert is_valid_token(token) is True

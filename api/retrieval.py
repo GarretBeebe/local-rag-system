@@ -39,7 +39,7 @@ from settings import (
 logger = logging.getLogger(__name__)
 
 
-class RetrievalUnavailable(Exception):
+class RetrievalError(Exception):
     """Raised when the vector store is unreachable or returns an infrastructure error."""
 
 
@@ -133,7 +133,7 @@ def qdrant_recall(
             ]
         except Exception as e:
             logger.error("Qdrant vector recall failed: %s: %s", type(e).__name__, e)
-            raise RetrievalUnavailable(str(e)) from e
+            raise RetrievalError(str(e)) from e
     return results
 
 
@@ -219,7 +219,7 @@ def hybrid_recall(
 
 def _deduplicate(candidates: list[Chunk]) -> list[Chunk]:
     """Remove duplicate chunks by point id, preserving order."""
-    seen: set = set()
+    seen: set[str | int] = set()
     result = []
     for c in candidates:
         if c.id not in seen:

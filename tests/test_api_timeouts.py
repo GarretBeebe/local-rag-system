@@ -60,6 +60,7 @@ def test_models_endpoint_passes_configured_timeout(monkeypatch):
 def test_warm_models_passes_configured_timeout(monkeypatch):
     """_warm_models() must forward OLLAMA_WARMUP_TIMEOUT_SECONDS to the LLM warmup call."""
     import asyncio
+
     import web.api_server as srv
     from settings import OLLAMA_WARMUP_TIMEOUT_SECONDS
 

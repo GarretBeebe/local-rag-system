@@ -2,7 +2,6 @@
 
 import asyncio
 import time
-from collections import defaultdict
 
 import pytest
 
