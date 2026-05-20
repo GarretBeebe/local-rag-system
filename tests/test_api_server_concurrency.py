@@ -75,6 +75,7 @@ def test_run_rag_with_timeout_raises_504_when_budget_exhausted_after_acquire(mon
     global time.monotonic, so asyncio's own internal time calls are unaffected.
     """
     import time as real_time_mod
+
     import web.api_server as srv
 
     class _FakeTime:
@@ -112,6 +113,7 @@ def test_semaphore_released_via_done_callback_after_generation_timeout(monkeypat
     """When asyncio.wait_for times out during generation the done callback on the
     underlying concurrent.futures.Future must still release the semaphore slot."""
     import time as real_time_mod
+
     import web.api_server as srv
 
     class _FakeTime:

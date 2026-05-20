@@ -114,7 +114,9 @@ def _upsert_chunks(path: Path, points: list[PointStruct]) -> Literal["indexed", 
             collection_name=COLLECTION,
             points_selector=Filter(
                 must=[FieldCondition(key="filepath", match=MatchValue(value=filepath))],
-                must_not=[FieldCondition(key="index_version", match=MatchValue(value=index_version))],
+                must_not=[
+                    FieldCondition(key="index_version", match=MatchValue(value=index_version))
+                ],
             ),
         )
     except Exception as e:
@@ -130,16 +132,16 @@ def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
     ensure_collection()
     normalized_path = normalize_path(path)
 
-    t_read = time.monotonic()
+    read_started = time.monotonic()
     text = _read_file(path)
-    t_read = time.monotonic() - t_read
+    read_elapsed = time.monotonic() - read_started
     if text is None:
         return "skipped"
 
-    t_chunk = time.monotonic()
+    chunk_started = time.monotonic()
     chunks = chunk_document(path, text)
     chunks = [c.strip() for c in chunks if c and c.strip()]
-    t_chunk = time.monotonic() - t_chunk
+    chunk_elapsed = time.monotonic() - chunk_started
 
     if not chunks:
         logger.info("No non-empty chunks for %s", path)
@@ -147,26 +149,26 @@ def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
 
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, normalized_path))
 
-    t_embed = time.monotonic()
+    embed_started = time.monotonic()
     try:
         points = _embed_chunks(path, chunks, document_id)
     except Exception as e:
         logger.error("Embedding failed for %s: %s", path, e)
         return "failed"
-    t_embed = time.monotonic() - t_embed
+    embed_elapsed = time.monotonic() - embed_started
 
     if not points:
         logger.warning("No valid chunks to index for %s", path)
         return "failed"
 
-    t_upsert = time.monotonic()
+    upsert_started = time.monotonic()
     result = _upsert_chunks(path, points)
-    t_upsert = time.monotonic() - t_upsert
+    upsert_elapsed = time.monotonic() - upsert_started
 
     if result == "indexed":
         logger.info(
             "Indexed %s: %d chunks — read=%.2fs chunk=%.2fs embed=%.2fs upsert=%.2fs",
-            path, len(points), t_read, t_chunk, t_embed, t_upsert,
+            path, len(points), read_elapsed, chunk_elapsed, embed_elapsed, upsert_elapsed,
         )
     return result
 

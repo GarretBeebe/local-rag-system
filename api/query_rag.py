@@ -15,16 +15,30 @@ Can be run directly as a script for interactive querying:
 
 import logging
 import threading
+import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import api.ollama_client as ollama_client
-from api.retrieval import Chunk, RetrievalUnavailable, retrieve_best, timed
-from settings import GEN_MODEL
+from api.retrieval import Chunk, RetrievalError, retrieve_best
+from settings import GEN_MODEL, RAG_TIMING
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _timed(label: str):
+    if not RAG_TIMING:
+        yield
+        return
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        logger.debug("%s: %.3fs", label, time.perf_counter() - start)
 
 _NO_CONTEXT_REPLY = "No relevant context found in the vector store yet."
 _RETRIEVAL_UNAVAILABLE_STRICT = (
@@ -105,7 +119,7 @@ def _prepare_query(
 ) -> _PreparedQuery:
     try:
         chunks = retrieve_best(question)
-    except RetrievalUnavailable:
+    except RetrievalError:
         if rag_mode == "strict":
             return _PreparedQuery(prompt=None, direct_reply=_RETRIEVAL_UNAVAILABLE_STRICT)
         return _PreparedQuery(prompt=question, sources=_RETRIEVAL_UNAVAILABLE_NOTICE)
@@ -125,7 +139,7 @@ def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "a
     if prepared.direct_reply is not None:
         return prepared.direct_reply
 
-    with timed("generate"):
+    with _timed("generate"):
         answer = ollama_client.generate(prepared.prompt or question, model).strip()
 
     if "Answer:" in answer:
@@ -149,7 +163,7 @@ def ask_stream_sync(
         yield prepared.direct_reply
         return
 
-    with timed("stream_generate"):
+    with _timed("stream_generate"):
         yield from ollama_client.stream_generate(prepared.prompt or question, model, cancel=cancel)
 
     if cancel and cancel.is_set():

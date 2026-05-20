@@ -1,7 +1,7 @@
 """Unit tests for index_documents embedding-failure behavior."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,7 +16,10 @@ def tmp_doc(tmp_path: Path) -> Path:
 def test_embed_failure_returns_failed(tmp_doc, monkeypatch):
     """Any embedding error must cause index_file to return 'failed'."""
     monkeypatch.setattr("ingest.index_documents.ensure_collection", lambda: None)
-    monkeypatch.setattr("ingest.index_documents.embed", lambda t: (_ for _ in ()).throw(RuntimeError("embed down")))
+    monkeypatch.setattr(
+        "ingest.index_documents.embed",
+        lambda t: (_ for _ in ()).throw(RuntimeError("embed down")),
+    )
 
     upsert_calls = []
     mock_client = MagicMock()
@@ -31,9 +34,13 @@ def test_embed_failure_returns_failed(tmp_doc, monkeypatch):
 
 
 def test_embed_failure_does_not_update_fingerprint(tmp_doc, monkeypatch):
-    """index_file must return 'failed' (not 'indexed') so the watcher skips the fingerprint update."""
+    """index_file must return 'failed' (not 'indexed') so the watcher skips the fingerprint
+    update."""
     monkeypatch.setattr("ingest.index_documents.ensure_collection", lambda: None)
-    monkeypatch.setattr("ingest.index_documents.embed", lambda t: (_ for _ in ()).throw(RuntimeError("embed down")))
+    monkeypatch.setattr(
+        "ingest.index_documents.embed",
+        lambda t: (_ for _ in ()).throw(RuntimeError("embed down")),
+    )
     monkeypatch.setattr("ingest.index_documents.get_qdrant_client", MagicMock)
 
     from ingest.index_documents import index_file

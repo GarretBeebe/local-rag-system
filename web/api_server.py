@@ -19,7 +19,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Literal
@@ -29,7 +29,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
 
 import api.ollama_client as ollama_client
 import api.retrieval
@@ -97,7 +96,9 @@ def _get_rag_executor() -> ThreadPoolExecutor:
 
 def _get_rag_concurrency() -> asyncio.Semaphore:
     if _RAG_CONCURRENCY is None:
-        raise RuntimeError("RAG concurrency limiter has not been initialized — lifespan not started")
+        raise RuntimeError(
+            "RAG concurrency limiter has not been initialized — lifespan not started"
+        )
     return _RAG_CONCURRENCY
 
 
@@ -169,20 +170,17 @@ app.add_middleware(
 )
 
 
-class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: Callable[..., Any]) -> Response:
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'"
-        )
-        return response
-
-
-app.add_middleware(_SecurityHeadersMiddleware)
+@app.middleware("http")
+async def _security_headers_middleware(request: Request, call_next: Callable[..., Any]) -> Response:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'"
+    )
+    return response
 
 
 async def _run_rag_with_timeout(
@@ -233,17 +231,17 @@ async def _run_rag_with_timeout(
     return str(answer or "").strip()
 
 
-async def _rag_stream_response(
+async def _start_stream_worker(
     question: str,
     model: str,
-    rag_mode: Literal["strict", "augmented"] = "augmented",
-    http_request: Request | None = None,
-) -> AsyncIterator[str]:
-    """Bridge ask_stream_sync (sync generator) to an async SSE generator."""
-    loop = asyncio.get_running_loop()
+    rag_mode: Literal["strict", "augmented"],
+    loop: asyncio.AbstractEventLoop,
+) -> tuple[asyncio.Queue[str | Exception | None], threading.Event, Future[None]]:
+    """Acquire the semaphore, schedule the stream worker, and return (queue, cancel_event, future).
+
+    Raises TimeoutError if the semaphore cannot be acquired within RAG_REQUEST_TIMEOUT_SECONDS.
+    """
     queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
-    request_id = f"chatcmpl-{uuid.uuid4()}"
-    created = int(time.time())
     cancel_event = threading.Event()
 
     def _run():
@@ -256,17 +254,8 @@ async def _rag_stream_response(
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
     semaphore = _get_rag_concurrency()
-    try:
-        await asyncio.wait_for(semaphore.acquire(), timeout=RAG_REQUEST_TIMEOUT_SECONDS)
-    except TimeoutError:
-        logger.warning("RAG stream timed out waiting for capacity")
-        yield make_stream_chunk(
-            request_id, created, model, content="\n\n[Error: server at capacity, please retry]"
-        )
-        yield make_stream_chunk(request_id, created, model, finish_reason="stop")
-        yield "data: [DONE]\n\n"
-        return
-    future = None
+    await asyncio.wait_for(semaphore.acquire(), timeout=RAG_REQUEST_TIMEOUT_SECONDS)
+    future: Future[None] | None = None
     try:
         future = loop.run_in_executor(_get_rag_executor(), _run)
         future.add_done_callback(lambda _f: semaphore.release())
@@ -275,18 +264,27 @@ async def _rag_stream_response(
             semaphore.release()
         raise
 
-    async def _watch_disconnect():
-        if http_request is None:
+    return queue, cancel_event, future
+
+
+async def _watch_disconnect(request: Request, cancel_event: threading.Event) -> None:
+    """Poll for client disconnect and set cancel_event when detected."""
+    while not cancel_event.is_set():
+        await asyncio.sleep(0.5)
+        if await request.is_disconnected():
+            cancel_event.set()
+            logger.info("Client disconnected — cancelling stream")
             return
-        while not cancel_event.is_set():
-            await asyncio.sleep(0.5)
-            if await http_request.is_disconnected():
-                cancel_event.set()
-                logger.info("Client disconnected — cancelling stream")
-                return
 
-    disconnect_task = asyncio.create_task(_watch_disconnect())
 
+async def _stream_queue_events(
+    queue: asyncio.Queue[str | Exception | None],
+    cancel_event: threading.Event,
+    request_id: str,
+    created: int,
+    model: str,
+) -> AsyncIterator[str]:
+    """Drain the worker queue, mapping exceptions and timeouts to SSE error chunks."""
     try:
         while True:
             item = await asyncio.wait_for(queue.get(), timeout=STREAM_TIMEOUT_SECONDS)
@@ -305,17 +303,52 @@ async def _rag_stream_response(
         yield make_stream_chunk(
             request_id, created, model, content="\n\n[Error: generation timed out]"
         )
+
+
+async def _rag_stream_response(
+    question: str,
+    model: str,
+    rag_mode: Literal["strict", "augmented"] = "augmented",
+    http_request: Request | None = None,
+) -> AsyncIterator[str]:
+    """Bridge ask_stream_sync (sync generator) to an async SSE generator."""
+    loop = asyncio.get_running_loop()
+    request_id = f"chatcmpl-{uuid.uuid4()}"
+    created = int(time.time())
+
+    try:
+        queue, cancel_event, _ = await _start_stream_worker(question, model, rag_mode, loop)
+    except TimeoutError:
+        logger.warning("RAG stream timed out waiting for capacity")
+        yield make_stream_chunk(
+            request_id, created, model, content="\n\n[Error: server at capacity, please retry]"
+        )
+        yield make_stream_chunk(request_id, created, model, finish_reason="stop")
+        yield "data: [DONE]\n\n"
+        return
+
+    disconnect_task = (
+        asyncio.create_task(_watch_disconnect(http_request, cancel_event))
+        if http_request is not None
+        else None
+    )
+
+    try:
+        async for chunk in _stream_queue_events(queue, cancel_event, request_id, created, model):
+            yield chunk
     finally:
         cancel_event.set()
-        disconnect_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await disconnect_task
+        if disconnect_task is not None:
+            disconnect_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await disconnect_task
 
     yield make_stream_chunk(request_id, created, model, finish_reason="stop")
     yield "data: [DONE]\n\n"
 
 
 @app.get("/v1/models")
+@app.get("/models")
 def models():
     try:
         resp = ollama_client.get("/api/tags", timeout=OLLAMA_MODEL_LIST_TIMEOUT_SECONDS)
@@ -326,12 +359,8 @@ def models():
     return {"object": "list", "data": data}
 
 
-@app.get("/models")
-def models_alias():
-    return models()
-
-
 @app.post("/v1/chat/completions")
+@app.post("/chat/completions")
 async def chat(request: Request, req: ChatRequest):
     validate_chat_request(req)
     question = extract_question_from_messages(req.messages)
@@ -345,11 +374,6 @@ async def chat(request: Request, req: ChatRequest):
 
     answer = await _run_rag_with_timeout(question, req.model, rag_mode)
     return build_chat_response(answer, req.model)
-
-
-@app.post("/chat/completions")
-async def chat_alias(request: Request, req: ChatRequest):
-    return await chat(request, req)
 
 
 @app.get("/")
@@ -384,8 +408,11 @@ async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
 async def _warm_models() -> None:
     logger.info("Warming RAG models...")
     await asyncio.gather(
-        _warm_one("LLM", ollama_client.post, "/api/generate",
-                  json={"model": GEN_MODEL, "prompt": "warmup", "stream": False}, timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS),
+        _warm_one(
+            "LLM", ollama_client.post, "/api/generate",
+            json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
+            timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS,
+        ),
         _warm_one("Embedding model", embed, "warmup"),
         _warm_one(
             "Reranker", rerank, "warmup",
