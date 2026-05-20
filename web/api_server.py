@@ -13,6 +13,7 @@ Run with:
 """
 
 import asyncio
+import ipaddress
 import logging
 import threading
 import time
@@ -45,6 +46,7 @@ from settings import (
     RAG_EXECUTOR_WORKERS,
     RAG_REQUEST_TIMEOUT_SECONDS,
     STREAM_TIMEOUT_SECONDS,
+    TRUSTED_PROXY_IPS,
 )
 from web import user_store
 from web.auth import create_token, is_valid_token
@@ -65,6 +67,20 @@ _WEB_DIR = Path(__file__).parent
 # Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
 # preventing timing-based username enumeration.
 _DUMMY_HASH: bytes = _bcrypt.hashpw(b"__sentinel__", _bcrypt.gensalt())
+
+def resolve_client_ip(request: Request) -> str:
+    peer = request.client.host if request.client else "unknown"
+    if peer in TRUSTED_PROXY_IPS:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        first = forwarded.split(",", 1)[0].strip()
+        if first:
+            try:
+                ipaddress.ip_address(first)
+                return first
+            except ValueError:
+                pass
+    return peer
+
 
 # Initialized in lifespan after the event loop is running.
 _RAG_EXECUTOR: ThreadPoolExecutor
@@ -114,10 +130,7 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]):
     if request.url.path in ("/", "/favicon.ico") or request.url.path.startswith("/ui"):
         return await call_next(request)
 
-    client_ip = (
-        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or (request.client.host if request.client else "unknown")
-    )
+    client_ip = resolve_client_ip(request)
     if request.url.path == "/auth/login":
         if not await check_login_rate_limit(client_ip):
             return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
@@ -214,8 +227,14 @@ async def _rag_stream_response(
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
     await _RAG_CONCURRENCY.acquire()
-    future = loop.run_in_executor(_RAG_EXECUTOR, _run)
-    future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
+    future = None
+    try:
+        future = loop.run_in_executor(_RAG_EXECUTOR, _run)
+        future.add_done_callback(lambda _f: _RAG_CONCURRENCY.release())
+    except BaseException:
+        if future is None:
+            _RAG_CONCURRENCY.release()
+        raise
 
     async def _watch_disconnect():
         if http_request is None:

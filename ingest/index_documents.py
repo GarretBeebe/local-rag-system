@@ -102,19 +102,29 @@ def _embed_chunks(path: Path, chunks: list[str], document_id: str) -> list[Point
 
 
 def _upsert_chunks(path: Path, points: list[PointStruct]) -> Literal["indexed", "failed"]:
-    """Delete existing vectors for path then upsert the new points."""
-    try:
-        delete_document(path)
-    except Exception as e:
-        logger.error("Failed to delete existing vectors for %s: %s", path, e)
-        return "failed"
+    """Upsert replacement points then delete stale vectors for path."""
+    filepath = normalize_path(path)
+    index_version = str(uuid.uuid4())
+    for p in points:
+        p.payload["index_version"] = index_version
+        p.payload["active"] = True
     try:
         get_qdrant_client().upsert(collection_name=COLLECTION, points=points)
     except Exception as e:
-        # Delete succeeded but upsert failed: document is absent until next successful re-index.
+        logger.error("Upsert failed for %s: %s", path, e)
+        return "failed"
+    try:
+        get_qdrant_client().delete(
+            collection_name=COLLECTION,
+            points_selector=Filter(
+                must=[FieldCondition(key="filepath", match=MatchValue(value=filepath))],
+                must_not=[FieldCondition(key="index_version", match=MatchValue(value=index_version))],
+            ),
+        )
+    except Exception as e:
         logger.error(
-            "Upsert failed for %s after delete — absent from index until next re-index: %s",
-            path, e,
+            "Stale vector cleanup failed for %s — fingerprint not updated, "
+            "will retry on next poll: %s", path, e,
         )
         return "failed"
     return "indexed"

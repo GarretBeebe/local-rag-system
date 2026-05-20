@@ -69,3 +69,10 @@ def list_all_paths() -> list[str]:
     with conn:
         rows = conn.execute("SELECT filepath FROM fingerprints").fetchall()
     return [row[0] for row in rows]
+
+
+def clear_hashes() -> None:
+    """Delete all fingerprint records, resetting the store to empty."""
+    conn = _store.conn
+    with conn:
+        conn.execute("DELETE FROM fingerprints")
