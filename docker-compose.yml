@@ -87,6 +87,8 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    labels:
+      - com.getarcaneapp.arcane.updater=false
 
   watcher:
     image: rag-system:latest
@@ -114,6 +116,8 @@ services:
       # Mount your document directories here. See note at top of file.
       - ${NEXTCLOUD_PATH}:/watch/Nextcloud:ro
       - ${CODE_PATH}:/watch/Code:ro
+    labels:
+      - com.getarcaneapp.arcane.updater=false
 
 volumes:
   qdrant-storage:
