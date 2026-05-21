@@ -21,7 +21,7 @@ def test_qdrant_recall_raises_retrieval_unavailable_on_qdrant_error(monkeypatch)
 
 def test_prepare_query_strict_mode_returns_unavailable_reply(monkeypatch):
     """In strict mode, a RetrievalError must produce a direct refusal reply."""
-    from api.query_rag import _prepare_query
+    from api.query_rag import _DirectReply, _prepare_query
 
     monkeypatch.setattr(
         "api.query_rag.retrieve_best",
@@ -29,14 +29,13 @@ def test_prepare_query_strict_mode_returns_unavailable_reply(monkeypatch):
     )
 
     result = _prepare_query("anything", rag_mode="strict")
-    assert result.direct_reply is not None
-    assert "unavailable" in result.direct_reply.lower()
-    assert result.prompt is None
+    assert isinstance(result, _DirectReply)
+    assert "unavailable" in result.text.lower()
 
 
 def test_prepare_query_augmented_mode_includes_degraded_notice(monkeypatch):
     """In augmented mode, a RetrievalError must allow fallback with a degradation notice."""
-    from api.query_rag import _prepare_query
+    from api.query_rag import _PromptQuery, _prepare_query
 
     monkeypatch.setattr(
         "api.query_rag.retrieve_best",
@@ -44,21 +43,22 @@ def test_prepare_query_augmented_mode_includes_degraded_notice(monkeypatch):
     )
 
     result = _prepare_query("my question", rag_mode="augmented")
-    assert result.direct_reply is None
+    assert isinstance(result, _PromptQuery)
     assert result.prompt == "my question"
     assert "unavailable" in result.sources.lower()
 
 
 def test_prepare_query_empty_result_uses_no_context_path(monkeypatch):
     """A successful Qdrant search returning no chunks must not be confused with a failure."""
-    from api.query_rag import _NO_CONTEXT_REPLY, _prepare_query
+    from api.query_rag import _NO_CONTEXT_REPLY, _DirectReply, _PromptQuery, _prepare_query
 
     monkeypatch.setattr("api.query_rag.retrieve_best", lambda *a, **kw: [])
 
     strict = _prepare_query("q", rag_mode="strict")
-    assert strict.direct_reply == _NO_CONTEXT_REPLY
+    assert isinstance(strict, _DirectReply)
+    assert strict.text == _NO_CONTEXT_REPLY
 
     augmented = _prepare_query("q", rag_mode="augmented")
-    assert augmented.direct_reply is None
+    assert isinstance(augmented, _PromptQuery)
     assert augmented.prompt == "q"
     assert "unavailable" not in augmented.sources.lower()

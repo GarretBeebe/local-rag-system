@@ -38,10 +38,14 @@ _RETRIEVAL_UNAVAILABLE_NOTICE = (
 
 
 @dataclass(frozen=True)
-class _PreparedQuery:
-    prompt: str | None
+class _DirectReply:
+    text: str
+
+
+@dataclass(frozen=True)
+class _PromptQuery:
+    prompt: str
     sources: str = ""
-    direct_reply: str | None = None
 
 
 def _resolve_source(payload: dict[str, Any]) -> str:
@@ -102,19 +106,19 @@ def _format_sources(chunks: list[Chunk]) -> str:
 def _prepare_query(
     question: str,
     rag_mode: RagMode = "augmented",
-) -> _PreparedQuery:
+) -> _PromptQuery | _DirectReply:
     try:
         chunks = retrieve_best(question)
     except RetrievalError:
         if rag_mode == "strict":
-            return _PreparedQuery(prompt=None, direct_reply=_RETRIEVAL_UNAVAILABLE_STRICT)
-        return _PreparedQuery(prompt=question, sources=_RETRIEVAL_UNAVAILABLE_NOTICE)
+            return _DirectReply(_RETRIEVAL_UNAVAILABLE_STRICT)
+        return _PromptQuery(question, sources=_RETRIEVAL_UNAVAILABLE_NOTICE)
     if not chunks:
         if rag_mode == "augmented":
-            return _PreparedQuery(prompt=question)
-        return _PreparedQuery(prompt=None, direct_reply=_NO_CONTEXT_REPLY)
+            return _PromptQuery(question)
+        return _DirectReply(_NO_CONTEXT_REPLY)
 
-    return _PreparedQuery(
+    return _PromptQuery(
         prompt=build_prompt(question, chunks, rag_mode),
         sources=_format_sources(chunks),
     )
@@ -122,11 +126,11 @@ def _prepare_query(
 
 def ask(question: str, model: str, rag_mode: RagMode = "augmented") -> str:
     prepared = _prepare_query(question, rag_mode)
-    if prepared.direct_reply is not None:
-        return prepared.direct_reply
+    if isinstance(prepared, _DirectReply):
+        return prepared.text
 
     with _timed("generate"):
-        answer = ollama_client.generate(prepared.prompt or question, model).strip()
+        answer = ollama_client.generate(prepared.prompt, model).strip()
 
     return answer + prepared.sources
 
@@ -142,12 +146,12 @@ def ask_stream_sync(
         return
 
     prepared = _prepare_query(question, rag_mode)
-    if prepared.direct_reply is not None:
-        yield prepared.direct_reply
+    if isinstance(prepared, _DirectReply):
+        yield prepared.text
         return
 
     with _timed("stream_generate"):
-        yield from ollama_client.stream_generate(prepared.prompt or question, model, cancel=cancel)
+        yield from ollama_client.stream_generate(prepared.prompt, model, cancel=cancel)
 
     if cancel and cancel.is_set():
         return

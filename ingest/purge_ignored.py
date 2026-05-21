@@ -29,10 +29,6 @@ class NoAccessibleWatchRootsError(RuntimeError):
     pass
 
 
-def load_config(path: Path) -> dict:
-    return load_yaml_config(path, allow_empty=True)
-
-
 def _iter_accessible_roots(config: dict) -> list[Path]:
     roots = []
     for entry in config.get("watch_paths", []):
@@ -80,7 +76,7 @@ def find_ignored_paths(config: dict) -> list[str]:
 
 def purge_ignored(config_path: Path, *, apply: bool) -> int:
     init_db()
-    config = load_config(config_path)
+    config = load_yaml_config(config_path, allow_empty=True)
     ignored = find_ignored_paths(config)
 
     action = "Deleting" if apply else "Would delete"

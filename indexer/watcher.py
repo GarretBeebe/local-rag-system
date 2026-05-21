@@ -20,8 +20,9 @@ from collections.abc import Generator
 from contextlib import suppress
 from pathlib import Path
 from queue import Queue
+from typing import Any
 
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
 from common.config import load_yaml_config
@@ -41,7 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_config() -> dict:
+def load_config() -> dict[str, Any]:
     try:
         return load_yaml_config(CONFIG_PATH)
     except FileNotFoundError:
@@ -120,7 +121,7 @@ class IndexWorker:
 
 class WatchHandler(FileSystemEventHandler):
 
-    def __init__(self, config: dict, worker: IndexWorker, required_mount_roots: list[Path]):
+    def __init__(self, config: dict[str, Any], worker: IndexWorker, required_mount_roots: list[Path]):
         self.allowed_ext = normalize_extensions(
             config.get("allowed_extensions", ALLOWED_EXTENSIONS)
         )
@@ -139,15 +140,15 @@ class WatchHandler(FileSystemEventHandler):
         if is_indexable_path(path, self.allowed_ext, self.ignore):
             self.worker.submit(normalize_path(path))
 
-    def on_created(self, event) -> None:
+    def on_created(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
             self.enqueue(event.src_path)
 
-    def on_modified(self, event) -> None:
+    def on_modified(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
             self.enqueue(event.src_path)
 
-    def on_deleted(self, event) -> None:
+    def on_deleted(self, event: FileSystemEvent) -> None:
         if event.is_directory or not is_indexable_path(
             event.src_path, self.allowed_ext, self.ignore
         ):
@@ -165,7 +166,7 @@ class WatchHandler(FileSystemEventHandler):
         bump_index_version()
 
 
-def _iter_watch_paths(watch_paths: list) -> Generator[tuple[dict, Path], None, None]:
+def _iter_watch_paths(watch_paths: list[dict[str, Any]]) -> Generator[tuple[dict[str, Any], Path], None, None]:
     for entry in watch_paths:
         raw_path = Path(entry["path"]).expanduser()
         if not raw_path.exists():
@@ -174,7 +175,7 @@ def _iter_watch_paths(watch_paths: list) -> Generator[tuple[dict, Path], None, N
         yield entry, Path(normalize_path(raw_path))
 
 
-def validate_required_mounts(required_mounts: list[dict]) -> list[Path]:
+def validate_required_mounts(required_mounts: list[dict[str, Any]]) -> list[Path]:
     """Validate bind mount roots at startup. Exits with code 1 if any are missing or empty."""
     if not required_mounts:
         logger.warning("No required_mounts configured — skipping mount validation")
