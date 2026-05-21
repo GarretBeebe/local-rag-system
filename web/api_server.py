@@ -40,8 +40,8 @@ from settings import (
     API_KEY,
     CORS_ORIGINS,
     GEN_MODEL,
-    JWT_SECRET,
     JWT_EXPIRY_HOURS,
+    JWT_SECRET,
     OLLAMA_MODEL_LIST_TIMEOUT_SECONDS,
     OLLAMA_WARMUP_TIMEOUT_SECONDS,
     RAG_CONCURRENCY_LIMIT,
@@ -53,7 +53,7 @@ from settings import (
 from web import user_store
 from web.auth import create_token, is_valid_token
 from web.openai_compat import build_chat_response, make_stream_chunk, model_entry
-from web.rate_limit import check_login_rate_limit, check_rate_limit
+from web.rate_limit import check_login_rate_limit, check_rate_limit, start_sweep_tasks
 from web.schemas import (
     ChatRequest,
     LoginRequest,
@@ -126,12 +126,18 @@ async def lifespan(app: FastAPI):
         )
 
     warm_task = asyncio.create_task(_warm_models())
+    sweep_tasks = await start_sweep_tasks()
     try:
         yield
     finally:
         warm_task.cancel()
+        for t in sweep_tasks:
+            t.cancel()
         with suppress(asyncio.CancelledError):
             await warm_task
+        for t in sweep_tasks:
+            with suppress(asyncio.CancelledError):
+                await t
         _get_rag_executor().shutdown(wait=False)
 
 

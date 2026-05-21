@@ -22,13 +22,36 @@ async def check_rate_limit(
     """Return True if the request is within rate limits, False if it should be rejected."""
     async with _rate_lock:
         now = time.monotonic()
-        buckets[ip] = [t for t in buckets[ip] if now - t < RATE_WINDOW_SECONDS]
-        if len(buckets[ip]) >= max_requests:
+        active = [t for t in buckets.get(ip, []) if now - t < RATE_WINDOW_SECONDS]
+        if len(active) >= max_requests:
+            buckets[ip] = active
             return False
-        buckets[ip].append(now)
+        active.append(now)
+        buckets[ip] = active
         return True
 
 
 async def check_login_rate_limit(ip: str) -> bool:
     """Return True if the login attempt is within the login rate limit."""
     return await check_rate_limit(ip, buckets=_login_rate_buckets, max_requests=LOGIN_RATE_MAX)
+
+
+async def _sweep_expired(buckets: dict[str, list[float]]) -> None:
+    """Evict IPs whose entire window has expired so the dicts don't grow unboundedly."""
+    while True:
+        await asyncio.sleep(RATE_WINDOW_SECONDS)
+        async with _rate_lock:
+            now = time.monotonic()
+            dead = [
+                ip for ip, ts in buckets.items()
+                if not any(now - t < RATE_WINDOW_SECONDS for t in ts)
+            ]
+            for ip in dead:
+                del buckets[ip]
+
+
+async def start_sweep_tasks() -> list[asyncio.Task[None]]:
+    return [
+        asyncio.create_task(_sweep_expired(_rate_buckets)),
+        asyncio.create_task(_sweep_expired(_login_rate_buckets)),
+    ]
