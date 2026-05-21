@@ -335,7 +335,7 @@ the relevant container (`api` or `watcher`).
 | `MMR_K` | `12` | Number of candidates kept after MMR diversification |
 | `FINAL_K` | `4` | Number of chunks passed to the LLM after reranking |
 | `MMR_LAMBDA_MULT` | `0.7` | MMR trade-off: 1.0 = pure relevance, 0.0 = pure diversity |
-| `KEYWORD_REFRESH_INTERVAL` | `300` | Seconds between BM25 keyword index rebuilds |
+| `KEYWORD_REFRESH_INTERVAL` | `30` | Seconds between cheap checks for watcher-indexed changes; BM25 rebuilds only when indexed content changed |
 
 Enable timing to identify which pipeline stage dominates latency:
 
@@ -363,6 +363,7 @@ Enable timing to identify which pipeline stage dominates latency:
 | `OLLAMA_EMBED_TIMEOUT_SECONDS` | `60` | Timeout for embedding calls to Ollama |
 | `OLLAMA_MODEL_LIST_TIMEOUT_SECONDS` | `5` | Timeout for the `/api/tags` model list call |
 | `OLLAMA_WARMUP_TIMEOUT_SECONDS` | `60` | Timeout for the startup warmup call to Ollama |
+| `WARM_MODELS_ON_STARTUP` | `false` | Set to `true` to warm the LLM, embedding model, and reranker when the API starts |
 
 ------------------------------------------------------------------------
 

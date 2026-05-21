@@ -4,7 +4,8 @@ import pytest
 
 # conftest.py patches sentence_transformers and KeywordIndex._build before
 # this module is imported, so api.retrieval loads without side effects.
-from api.retrieval import Chunk, _deduplicate, cosine, mmr_select
+import api.retrieval as retrieval
+from api.retrieval import Chunk, _deduplicate, cosine, mmr_select, rerank
 
 
 def _chunk(id: str, vector: list[float], text: str = "") -> Chunk:
@@ -102,3 +103,45 @@ def test_deduplication_no_duplicates_unchanged():
     chunks = [_chunk("a", [1.0, 0.0]), _chunk("b", [0.0, 1.0])]
     result = _deduplicate(chunks)
     assert len(result) == 2
+
+
+def test_startup_does_not_load_reranker(monkeypatch):
+    constructed = []
+
+    class FakeCrossEncoder:
+        def __init__(self, *args, **kwargs):
+            constructed.append((args, kwargs))
+
+    class FakeKeywordIndex:
+        known_filenames = set()
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(retrieval, "CrossEncoder", FakeCrossEncoder)
+    monkeypatch.setattr(retrieval, "KeywordIndex", FakeKeywordIndex)
+    monkeypatch.setattr(retrieval, "_reranker", None)
+
+    retrieval.startup("test-reranker")
+
+    assert constructed == []
+
+
+def test_rerank_loads_reranker_on_first_use(monkeypatch):
+    constructed = []
+
+    class FakeCrossEncoder:
+        def __init__(self, *args, **kwargs):
+            constructed.append((args, kwargs))
+
+        def predict(self, pairs):
+            return [0.5 for _ in pairs]
+
+    monkeypatch.setattr(retrieval, "CrossEncoder", FakeCrossEncoder)
+    monkeypatch.setattr(retrieval, "_reranker", None)
+    monkeypatch.setattr(retrieval, "_reranker_model_name", "test-reranker")
+
+    result = rerank("hello", [Chunk(id="a", score=1.0, vector=None, payload={"text": "world"})])
+
+    assert result[0].rerank_score == 0.5
+    assert constructed == [(("test-reranker",), {"device": "cpu"})]

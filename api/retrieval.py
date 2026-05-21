@@ -14,6 +14,7 @@ import difflib
 import logging
 import math
 import re
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -64,22 +65,30 @@ def _timed(label: str):
         logger.debug("%s: %.3fs", label, time.perf_counter() - start)
 
 _reranker: CrossEncoder | None = None
+_reranker_lock = threading.Lock()
+_reranker_model_name = RERANK_MODEL
 _keyword_index: KeywordIndex | None = None
 
 _FILENAME_RE = re.compile(r"\b([\w.-]+\.[a-zA-Z]{2,5})\b")
 
 
 def startup(rerank_model: str = RERANK_MODEL) -> None:
-    """Load models and start keyword index. Call from the API lifespan, not at import time."""
-    global _reranker, _keyword_index
-    _reranker = CrossEncoder(rerank_model, device="cpu")
+    """Start retrieval support services. The reranker model loads on first use."""
+    global _reranker, _reranker_model_name, _keyword_index
+    if _reranker_model_name != rerank_model:
+        _reranker = None
+    _reranker_model_name = rerank_model
     _keyword_index = KeywordIndex()
     _keyword_index.start()
 
 
 def _get_reranker() -> CrossEncoder:
+    global _reranker
     if _reranker is None:
-        raise RuntimeError("api.retrieval.startup() has not been called")
+        with _reranker_lock:
+            if _reranker is None:
+                logger.info("Loading reranker model: %s", _reranker_model_name)
+                _reranker = CrossEncoder(_reranker_model_name, device="cpu")
     return _reranker
 
 

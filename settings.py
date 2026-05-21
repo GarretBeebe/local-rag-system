@@ -69,6 +69,7 @@ OLLAMA_MODEL_LIST_TIMEOUT_SECONDS = float(
     os.environ.get("OLLAMA_MODEL_LIST_TIMEOUT_SECONDS", "5.0")
 )
 OLLAMA_WARMUP_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_WARMUP_TIMEOUT_SECONDS", "60.0"))
+WARM_MODELS_ON_STARTUP = os.environ.get("WARM_MODELS_ON_STARTUP", "").lower() in ("1", "true")
 WATCHER_POLL_INTERVAL_SECONDS = float(os.environ.get("WATCHER_POLL_INTERVAL_SECONDS", "30"))
 
 # Retrieval pipeline
@@ -76,7 +77,7 @@ RECALL_K = int(os.environ.get("RECALL_K", "15"))
 MMR_K = int(os.environ.get("MMR_K", "12"))
 FINAL_K = int(os.environ.get("FINAL_K", "4"))
 MMR_LAMBDA_MULT = float(os.environ.get("MMR_LAMBDA_MULT", "0.7"))
-KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "300"))
+KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "30"))
 MAX_CHUNK_CHARS = 2000
 MAX_MD_CHUNK = 2000
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))

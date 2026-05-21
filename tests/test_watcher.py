@@ -50,10 +50,12 @@ def test_unchanged_hash_skips_indexing(existing_file: Path, monkeypatch) -> None
 
 
 def test_indexed_outcome_updates_fingerprint(changed_hashes: Path, monkeypatch) -> None:
-    """'indexed' outcome calls upsert_hash and returns INDEXED."""
+    """'indexed' outcome calls upsert_hash, bumps index version, and returns INDEXED."""
     monkeypatch.setattr("indexer.watcher.index_file", lambda p: "indexed")
     upserted: list[tuple[str, str]] = []
+    bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
+    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
     from indexer.watcher import IndexDecision, _index_if_changed
 
@@ -61,13 +63,16 @@ def test_indexed_outcome_updates_fingerprint(changed_hashes: Path, monkeypatch) 
 
     assert result == IndexDecision.INDEXED
     assert upserted == [(str(changed_hashes), "new_hash")]
+    assert bumps == [True]
 
 
 def test_skipped_outcome_does_not_update_fingerprint(changed_hashes: Path, monkeypatch) -> None:
     """'skipped' outcome does not call upsert_hash and returns SKIPPED."""
     monkeypatch.setattr("indexer.watcher.index_file", lambda p: "skipped")
     upserted: list[tuple[str, str]] = []
+    bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
+    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
     from indexer.watcher import IndexDecision, _index_if_changed
 
@@ -75,13 +80,16 @@ def test_skipped_outcome_does_not_update_fingerprint(changed_hashes: Path, monke
 
     assert result == IndexDecision.SKIPPED
     assert upserted == []
+    assert bumps == []
 
 
 def test_failed_outcome_does_not_update_fingerprint(changed_hashes: Path, monkeypatch) -> None:
     """'failed' outcome does not call upsert_hash and returns FAILED."""
     monkeypatch.setattr("indexer.watcher.index_file", lambda p: "failed")
     upserted: list[tuple[str, str]] = []
+    bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
+    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
     from indexer.watcher import IndexDecision, _index_if_changed
 
@@ -89,6 +97,7 @@ def test_failed_outcome_does_not_update_fingerprint(changed_hashes: Path, monkey
 
     assert result == IndexDecision.FAILED
     assert upserted == []
+    assert bumps == []
 
 
 def test_index_file_exception_is_logged_and_returns_failed(

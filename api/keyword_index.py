@@ -17,6 +17,8 @@ from typing import Any
 
 from rank_bm25 import BM25Okapi
 
+from common.index_state import get_index_version
+from common.index_state import init_db as init_index_state
 from settings import COLLECTION, KEYWORD_REFRESH_INTERVAL, get_qdrant_client
 
 logger = logging.getLogger(__name__)
@@ -32,13 +34,16 @@ class KeywordIndex:
         self.ids: list = []
         self.bm25: BM25Okapi | None = None
         self.known_filenames: set[str] = set()
+        self._last_seen_version: int | None = None
 
     def start(self) -> None:
         """Build the initial index and start the background refresh thread.
 
         Call this from the application lifespan, not at import time.
         """
+        init_index_state()
         self._build()
+        self._last_seen_version = get_index_version()
         t = threading.Thread(target=self._refresh_loop, args=(self._refresh_interval,), daemon=True)
         t.start()
 
@@ -74,10 +79,20 @@ class KeywordIndex:
     def _refresh_loop(self, interval: int) -> None:
         while True:
             time.sleep(interval)
-            try:
-                self._build()
-            except Exception as e:
-                logger.warning("KeywordIndex refresh failed: %s", e, exc_info=True)
+            self._refresh_if_changed()
+
+    def _refresh_if_changed(self) -> bool:
+        """Rebuild BM25 only when the shared document index version changes."""
+        try:
+            version = get_index_version()
+            if version == self._last_seen_version:
+                return False
+            self._build()
+            self._last_seen_version = version
+            return True
+        except Exception as e:
+            logger.warning("KeywordIndex refresh failed: %s", e, exc_info=True)
+            return False
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:

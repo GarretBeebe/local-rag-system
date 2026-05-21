@@ -49,6 +49,7 @@ from settings import (
     RAG_REQUEST_TIMEOUT_SECONDS,
     STREAM_TIMEOUT_SECONDS,
     TRUSTED_PROXY_IPS,
+    WARM_MODELS_ON_STARTUP,
 )
 from web import user_store
 from web.auth import create_token, is_valid_token
@@ -125,16 +126,18 @@ async def lifespan(app: FastAPI):
             "ALLOW_INSECURE_LOCALONLY=true"
         )
 
-    warm_task = asyncio.create_task(_warm_models())
+    warm_task = asyncio.create_task(_warm_models()) if WARM_MODELS_ON_STARTUP else None
     sweep_tasks = await start_sweep_tasks()
     try:
         yield
     finally:
-        warm_task.cancel()
+        if warm_task is not None:
+            warm_task.cancel()
         for t in sweep_tasks:
             t.cancel()
-        with suppress(asyncio.CancelledError):
-            await warm_task
+        if warm_task is not None:
+            with suppress(asyncio.CancelledError):
+                await warm_task
         for t in sweep_tasks:
             with suppress(asyncio.CancelledError):
                 await t

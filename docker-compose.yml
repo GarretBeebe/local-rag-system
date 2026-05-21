@@ -78,7 +78,8 @@ services:
       MMR_K: ${MMR_K:-12}
       FINAL_K: ${FINAL_K:-4}
       MMR_LAMBDA_MULT: ${MMR_LAMBDA_MULT:-0.7}
-      KEYWORD_REFRESH_INTERVAL: ${KEYWORD_REFRESH_INTERVAL:-300}
+      KEYWORD_REFRESH_INTERVAL: ${KEYWORD_REFRESH_INTERVAL:-30}
+      WARM_MODELS_ON_STARTUP: ${WARM_MODELS_ON_STARTUP:-false}
     volumes:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface

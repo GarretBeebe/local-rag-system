@@ -74,3 +74,9 @@ def test_warm_models_passes_configured_timeout(monkeypatch):
     monkeypatch.setattr(srv.ollama_client, "post", fake_post)
     asyncio.run(srv._warm_models())
     assert captured.get("timeout") == OLLAMA_WARMUP_TIMEOUT_SECONDS
+
+
+def test_model_warmup_is_opt_in_by_default():
+    from settings import WARM_MODELS_ON_STARTUP
+
+    assert WARM_MODELS_ON_STARTUP is False

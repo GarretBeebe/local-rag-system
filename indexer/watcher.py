@@ -25,6 +25,8 @@ import yaml
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
+from common.index_state import bump_index_version
+from common.index_state import init_db as init_index_state
 from common.paths import is_indexable_path, normalize_path
 from indexer.fingerprint_store import delete_hash, get_hash, init_db, upsert_hash
 from ingest.cleanup_stale import cleanup_stale
@@ -83,6 +85,7 @@ def _index_if_changed(path: str) -> IndexDecision:
         outcome = index_file(p)
         if outcome == "indexed":
             upsert_hash(path, file_hash)
+            bump_index_version()
             return IndexDecision.INDEXED
         if outcome == "skipped":
             logging.info("Skipped %s — fingerprint not updated", path)
@@ -166,6 +169,7 @@ class WatchHandler(FileSystemEventHandler):
         normalized_path = normalize_path(event.src_path)
         delete_document(normalized_path)
         delete_hash(normalized_path)
+        bump_index_version()
 
 
 def _iter_watch_paths(watch_paths: list) -> Generator[tuple[dict, Path], None, None]:
@@ -214,6 +218,7 @@ def main() -> None:
     required_mount_roots = validate_required_mounts(config.get("required_mounts", []))
 
     init_db()
+    init_index_state()
     worker = IndexWorker()
 
     watch_path_pairs = list(_iter_watch_paths(config["watch_paths"]))
