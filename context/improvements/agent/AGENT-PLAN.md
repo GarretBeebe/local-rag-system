@@ -552,7 +552,7 @@ AGENT_FILESYSTEM_ROOTS=/data/nextcloud,/home/garret  # comma-separated host path
 AGENT_ALLOW_WRITES=false
 
 # Nextcloud (WebDAV + CalDAV + CardDAV)
-NEXTCLOUD_URL=http://192.168.68.69
+NEXTCLOUD_URL=http://192.168.x.z
 NEXTCLOUD_USER=garret
 NEXTCLOUD_PASSWORD=<app-token>   # generate in Nextcloud → Security → App passwords
 

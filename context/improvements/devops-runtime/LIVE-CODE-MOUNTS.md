@@ -15,13 +15,13 @@ enable uvicorn's `--reload` flag for the API so file saves trigger an automatic 
 api:
   command: uvicorn web.api_server:app --host 0.0.0.0 --port 8000 --reload
   volumes:
-    - /home/garret/Code/rag-system:/app   # live source — must be Linux-native path
+    - /path/to/Code/rag-system:/app   # live source — must be Linux-native path
     - rag-data:/app/data
     - hf-cache:/root/.cache/huggingface
 
 watcher:
   volumes:
-    - /home/garret/Code/rag-system:/app   # live source
+    - /path/to/Code/rag-system:/app   # live source
     - rag-data:/app/data
     - hf-cache:/root/.cache/huggingface
     - ${NEXTCLOUD_PATH}:/watch/Nextcloud:ro
@@ -33,8 +33,8 @@ Python dependencies (installed into the image's site-packages) survive the mount
 
 ## Constraints
 
-- **Use the Linux-native path** (`/home/garret/Code/rag-system`), not the Windows FS path
-  (`/mnt/c/Users/Garret/Code/rag-system`). The WSL→Windows bridge mounts as an empty
+- **Use the Linux-native path** (`/path/to/Code/rag-system`), not the Windows FS path
+  (`/path/to/Code/rag-system`). The WSL→Windows bridge mounts as an empty
   directory inside the container.
 - **New dependencies still require a rebuild.** If `pyproject.toml` changes, run
   `docker compose build` once so site-packages are updated in the image layer.

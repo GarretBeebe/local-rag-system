@@ -83,7 +83,7 @@ services:
       - rag-data:/app/data
       - hf-cache:/root/.cache/huggingface
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 15s
       timeout: 5s
       retries: 5

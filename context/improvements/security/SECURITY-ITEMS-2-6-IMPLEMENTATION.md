@@ -4,7 +4,7 @@ Date: 2026-05-15
 
 Scope: Implement the immediate hardening items identified in the internet-exposed
 RAG review, excluding item 1 because the API must stay reachable from the separate
-Caddy host at `192.168.68.69`.
+Caddy host at `192.168.x.z`.
 
 ## Findings
 

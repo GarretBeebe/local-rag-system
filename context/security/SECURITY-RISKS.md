@@ -8,14 +8,14 @@ Scope: Application code, Docker Compose configuration, volume mounts, Caddy reve
 ## Architecture
 
 ```
-Internet ──► Caddy (DuckDNS/TLS) ──► tk421.nucbox:8000 (FastAPI)
+Internet ──► Caddy (DuckDNS/TLS) ──► <rag-api-host>:8000 (FastAPI)
                                             │
                                      qdrant:6333 (Docker internal + LAN-exposed)
                                             │
                                   host.docker.internal:11434 (Ollama, host)
 ```
 
-`ai.spoonscloud.duckdns.org` is internet-accessible. Caddy provisions TLS automatically via Let's Encrypt.
+`ai.example.internal` is internet-accessible. Caddy provisions TLS automatically via Let's Encrypt.
 
 ---
 
@@ -43,7 +43,7 @@ The Caddy layer adds TLS and a secret-path capability URL as the sole access con
 
 Qdrant binds to `0.0.0.0:6333` (HTTP) and `0.0.0.0:6334` (gRPC) and is not proxied through Caddy. It has no authentication. Any device on your LAN can read every indexed document chunk, delete the entire collection, or insert arbitrary data.
 
-**Example attack:** `curl http://tk421.nucbox:6333/collections/documents/points/scroll`
+**Example attack:** `curl http://<rag-api-host>:6333/collections/documents/points/scroll`
 
 This exposes the full text of everything ever indexed: Nextcloud files, resumes, code, scripts.
 
@@ -57,7 +57,7 @@ This exposes the full text of everything ever indexed: Nextcloud files, resumes,
 
 ```
 @invalid {
-    not path /d4ddba4633759950d0ddf3ea325e648a0b63d5a69d695924f1cecf7e528389c7/*
+    not path /REDACTED_SECRET_PATH/*
 }
 respond @invalid 403
 ```
@@ -108,7 +108,7 @@ The entire Nextcloud and Code directories are mounted into the watcher container
 Every chat completion response includes the resolved absolute path of every source file:
 
 ```
-[S1] /mnt/c/Users/Garret/Nextcloud/Resumes/resume.pdf (rerank=0.9234)
+[S1] /path/to/Nextcloud/Resumes/resume.pdf (rerank=0.9234)
 ```
 
 Anyone who obtains the secret URL receives a map of your filesystem with every query response. Combined with Caddy log exposure of the secret, this compounds into a meaningful data leak.

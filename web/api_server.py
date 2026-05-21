@@ -27,7 +27,7 @@ from typing import Any, Literal
 import bcrypt as _bcrypt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import api.ollama_client as ollama_client
@@ -41,6 +41,7 @@ from settings import (
     CORS_ORIGINS,
     GEN_MODEL,
     JWT_SECRET,
+    JWT_EXPIRY_HOURS,
     OLLAMA_MODEL_LIST_TIMEOUT_SECONDS,
     OLLAMA_WARMUP_TIMEOUT_SECONDS,
     RAG_CONCURRENCY_LIMIT,
@@ -65,6 +66,8 @@ logger = logging.getLogger(__name__)
 
 _SERVER_START = int(time.time())
 _WEB_DIR = Path(__file__).parent
+_STATIC_DIR = _WEB_DIR / "static"
+_AUTH_COOKIE = "rag_token"
 # Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
 # preventing timing-based username enumeration.
 _DUMMY_HASH: bytes = _bcrypt.hashpw(b"__sentinel__", _bcrypt.gensalt())
@@ -133,7 +136,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)
-app.mount("/ui", StaticFiles(directory=str(_WEB_DIR), html=True), name="ui")
+app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")
 
 
 @app.middleware("http")
@@ -142,7 +145,9 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]) -
     request.state.request_id = request_id
     logger.info("[%s] %s %s", request_id, request.method, request.url.path)
 
-    if request.url.path in ("/", "/favicon.ico") or request.url.path.startswith("/ui"):
+    if request.url.path == "/favicon.ico" or request.url.path.startswith("/ui"):
+        return await call_next(request)
+    if request.url.path == "/healthz":
         return await call_next(request)
 
     client_ip = resolve_client_ip(request)
@@ -150,12 +155,16 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]) -
         if not await check_login_rate_limit(client_ip):
             return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
         return await call_next(request)
+    if request.url.path == "/auth/logout":
+        return await call_next(request)
 
     if not await check_rate_limit(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
     if API_KEY or JWT_SECRET:
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not token:
+            token = request.cookies.get(_AUTH_COOKIE, "")
         if not is_valid_token(token):
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
@@ -177,8 +186,10 @@ async def _security_headers_middleware(request: Request, call_next: Callable[...
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'"
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'"
     )
     return response
 
@@ -376,13 +387,18 @@ async def chat(request: Request, req: ChatRequest):
     return build_chat_response(answer, req.model)
 
 
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+
 @app.get("/")
 def root():
-    return {"status": "rag-api running"}
+    return RedirectResponse(url="/ui/")
 
 
 @app.post("/auth/login")
-async def login(credentials: LoginRequest) -> dict[str, str]:
+async def login(request: Request, response: Response, credentials: LoginRequest) -> dict[str, bool]:
     if not JWT_SECRET:
         raise HTTPException(status_code=503, detail="Web UI login not configured")
     stored = user_store.get_hash(credentials.username)
@@ -394,7 +410,26 @@ async def login(credentials: LoginRequest) -> dict[str, str]:
     if not stored or not password_matches:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_token(credentials.username)
-    return {"token": token}
+    secure_cookie = (
+        request.url.scheme == "https"
+        or request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip() == "https"
+    )
+    response.set_cookie(
+        _AUTH_COOKIE,
+        token,
+        httponly=True,
+        secure=secure_cookie,
+        samesite="lax",
+        max_age=JWT_EXPIRY_HOURS * 3600,
+        path="/",
+    )
+    return {"ok": True}
+
+
+@app.post("/auth/logout")
+async def logout(response: Response) -> dict[str, bool]:
+    response.delete_cookie(_AUTH_COOKIE, path="/")
+    return {"ok": True}
 
 
 async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:

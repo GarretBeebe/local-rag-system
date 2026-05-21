@@ -168,16 +168,16 @@ path = Path(_resolve_source(p)).name
 
 The current Caddy config uses a secret path prefix as the only access control. This secret appears in plaintext in Caddy's access logs and browser history. Replace it with header-based auth.
 
-**Current block (`ai.spoonscloud.duckdns.org`):**
+**Current block (`ai.example.internal`):**
 ```caddy
-ai.spoonscloud.duckdns.org {
+ai.example.internal {
   @invalid {
-    not path /d4ddba4633759950d0ddf3ea325e648a0b63d5a69d695924f1cecf7e528389c7/*
+    not path /REDACTED_SECRET_PATH/*
   }
   respond @invalid 403
 
-  handle_path /d4ddba4633759950d0ddf3ea325e648a0b63d5a69d695924f1cecf7e528389c7/* {
-    reverse_proxy tk421.nucbox:8000 {
+  handle_path /REDACTED_SECRET_PATH/* {
+    reverse_proxy <rag-api-host>:8000 {
       flush_interval -1
     }
   }
@@ -186,10 +186,10 @@ ai.spoonscloud.duckdns.org {
 
 **Replace with:**
 ```caddy
-ai.spoonscloud.duckdns.org {
+ai.example.internal {
   encode zstd gzip
 
-  reverse_proxy tk421.nucbox:8000 {
+  reverse_proxy <rag-api-host>:8000 {
     flush_interval -1
   }
 }
@@ -199,7 +199,7 @@ The FastAPI middleware (Step 3) is now the auth layer. Caddy becomes a transpare
 
 **Optional defense-in-depth:** If you want Caddy to also inject the auth header so clients don't need to know the key (e.g. Open WebUI configured with no API key), add:
 ```caddy
-  reverse_proxy tk421.nucbox:8000 {
+  reverse_proxy <rag-api-host>:8000 {
     flush_interval -1
     header_up Authorization "Bearer {$RAG_API_KEY}"
   }
@@ -222,7 +222,7 @@ Ollama on Windows defaults to binding on `0.0.0.0:11434`, making it accessible t
 **Verify the problem first:**
 ```bash
 # From another machine on your LAN:
-curl http://tk421.nucbox:11434/api/tags
+curl http://<rag-api-host>:11434/api/tags
 # If this returns model data, Ollama is exposed.
 ```
 
@@ -242,7 +242,7 @@ ollama serve
 **Verify fix:**
 ```bash
 # From another machine — should now fail:
-curl http://tk421.nucbox:11434/api/tags
+curl http://<rag-api-host>:11434/api/tags
 # connection refused = fixed
 
 # From the host itself — should still work:
@@ -293,5 +293,5 @@ After all steps are complete:
 - [ ] `curl -X POST http://localhost:8000/v1/chat/completions -d '...'` → 401 (no auth header)
 - [ ] Same with `-H "Authorization: Bearer <key>"` → 200/504 depending on Ollama state
 - [ ] 31 rapid requests to chat endpoint → 429 on the 31st
-- [ ] `curl http://tk421.nucbox:11434/api/tags` from another machine → connection refused
-- [ ] `curl https://ai.spoonscloud.duckdns.org/v1/chat/completions` with correct auth header → 200
+- [ ] `curl http://<rag-api-host>:11434/api/tags` from another machine → connection refused
+- [ ] `curl https://ai.example.internal/v1/chat/completions` with correct auth header → 200

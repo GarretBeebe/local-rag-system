@@ -255,9 +255,9 @@ the same image with different commands.
 
 All three services should show status `running`.
 
-    curl http://localhost:8000/
+    curl http://localhost:8000/healthz
 
-Expected: `{"status":"rag-api running"}`
+Expected: `{"status":"ok"}`
 
 ## Logs
 
@@ -434,9 +434,11 @@ Endpoints
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/` | Health check |
-| `GET` | `/ui/` | Built-in web chat UI (no auth required to load) |
-| `POST` | `/auth/login` | Exchange username/password for a JWT |
+| `GET` | `/healthz` | Container health check |
+| `GET` | `/` | Redirects to `/ui/` when authenticated; protected like the API |
+| `GET` | `/ui/` | Built-in web chat UI assets (no auth required to load) |
+| `POST` | `/auth/login` | Exchange username/password for an HttpOnly JWT session cookie |
+| `POST` | `/auth/logout` | Clear the browser session cookie |
 | `GET` | `/v1/models` | List available models |
 | `GET` | `/models` | Alias for `/v1/models` |
 | `POST` | `/v1/chat/completions` | RAG-backed chat completion (supports `"stream": true`) |
@@ -447,9 +449,10 @@ Endpoints
 # Web UI
 
 A built-in chat interface is served at `/ui/` directly from the `rag-api`
-container. No extra container or build step required. Markdown rendering
-uses vendored copies of `marked.js` and `DOMPurify` — no internet access
-required at runtime.
+container. No extra container or build step required. Static browser assets
+are served from `web/static/` only, so backend Python modules are not exposed
+under `/ui/`. Markdown rendering uses vendored copies of `marked.js` and
+`DOMPurify` — no internet access required at runtime.
 
 ## Setup
 
@@ -457,9 +460,9 @@ required at runtime.
 
     JWT_SECRET=<output of: openssl rand -hex 32>
 
-**2. Recreate the api container** to pick up the new variable:
+**2. Recreate or rebuild the api container** to pick up the new variable:
 
-    docker compose up -d api
+    docker compose up -d --build api
 
 **3. Add users** via the management CLI:
 
@@ -482,8 +485,9 @@ Removing a user invalidates their active session on the next request.
 | Behind reverse proxy | `https://<your-domain>/ui/` |
 
 Log in with the username and password set via `manage_users.py`. The UI
-issues a JWT (default 8-hour expiry) stored in `localStorage`. When it
-expires the login form reappears automatically.
+sets a JWT-backed HttpOnly cookie (default 8-hour expiry). Browser JavaScript
+cannot read this cookie; the browser sends it automatically on same-origin API
+requests. When it expires, the login form reappears automatically.
 
 Machine clients (`API_KEY` bearer token) are unaffected — both auth
 mechanisms work simultaneously.
@@ -699,12 +703,12 @@ Runtime controls:
 
 | Control | Detail |
 | --- | --- |
-| API key auth | Set `API_KEY` in `.env`. All endpoints except `GET /`, `/favicon.ico`, `/ui/*`, and `/auth/login` require `Authorization: Bearer <key>`. Compared with `hmac.compare_digest` (timing-safe). |
-| Web UI auth | Set `JWT_SECRET` in `.env`. Browser users log in with username/password; server issues an 8-hour JWT. Credentials stored as bcrypt hashes in `data/users.sqlite3`. Login returns 503 if `JWT_SECRET` is unset. |
+| API key auth | Set `API_KEY` in `.env`. Protected API endpoints accept `Authorization: Bearer <key>` and compare it with `hmac.compare_digest` (timing-safe). Exempt paths are `/healthz`, `/favicon.ico`, `/ui/*`, `/auth/login`, and `/auth/logout`. |
+| Web UI auth | Set `JWT_SECRET` in `.env`. Browser users log in with username/password; server sets an 8-hour JWT-backed HttpOnly cookie. Credentials are stored as bcrypt hashes in `data/users.sqlite3`. Login returns 503 if `JWT_SECRET` is unset. |
 | Auth disabled local mode | If both `API_KEY` and `JWT_SECRET` are unset, startup fails unless `ALLOW_INSECURE_LOCALONLY=true` is set explicitly. Use only for local development. |
 | Rate limiting | General API requests are limited to 30 requests per minute per IP. `/auth/login` uses a separate tighter 10 attempts per minute per-IP bucket. Returns `429` when exceeded. |
 | Trusted proxy IPs | Set `TRUSTED_PROXY_IPS` (comma-separated) to the IP(s) of your reverse proxy. When set, `X-Forwarded-For` is used to identify the real client IP for rate limiting; unrecognised or malformed values fall back to the peer address. |
-| Security headers | All responses include `Content-Security-Policy`, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`. |
+| Security headers | All responses include `Content-Security-Policy` without inline script/style allowances, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`. |
 | XSS protection | LLM output in the web UI is sanitised with DOMPurify before rendering as HTML. `marked.js` and `DOMPurify` are vendored — no CDN dependency. |
 | CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins). Empty by default, which disables cross-origin browser access. |
 | Qdrant isolation | Qdrant is not bound to any host port — only reachable within the Docker network. `QDRANT_API_KEY` is required so other containers on that network cannot access it unauthenticated. |

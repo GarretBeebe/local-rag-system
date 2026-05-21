@@ -58,8 +58,8 @@ Host mapping:
 
   Host            IP              Purpose
   --------------- --------------- ---------------------
-  Raspberry Pi    192.168.68.70   Caddy gateway
-  Ubuntu server   192.168.68.85   Ollama model server
+  Raspberry Pi    192.168.x.x   Caddy gateway
+  Ubuntu server   192.168.x.y   Ollama model server
 
 ------------------------------------------------------------------------
 
@@ -67,7 +67,7 @@ Host mapping:
 
 Domain:
 
-    ai.spoonscloud.duckdns.org
+    ai.example.internal
 
 DNS resolution handled internally through Pi‑hole.
 
@@ -92,9 +92,9 @@ Benefits:
 
 ## Caddy Gateway Configuration
 
-    ai.spoonscloud.duckdns.org {
+    ai.example.internal {
 
-        reverse_proxy 192.168.68.85:11434 {
+        reverse_proxy 192.168.x.y:11434 {
             flush_interval -1
         }
 
@@ -115,7 +115,7 @@ Provider:
 
 API Host:
 
-    https://ai.spoonscloud.duckdns.org
+    https://ai.example.internal
 
 Chatbox automatically calls:
 
@@ -129,7 +129,7 @@ to discover available models.
 
 List models:
 
-    curl https://ai.spoonscloud.duckdns.org/api/tags
+    curl https://ai.example.internal/api/tags
 
 Generate text:
 

@@ -16,10 +16,10 @@ Why this matters:
 - A file deleted from disk can fail to be deleted from Qdrant, which means stale or sensitive content may remain retrievable after the source file is gone.
 
 Where:
-- [ingest/index_documents.py](/Users/garret/Code/rag-system/ingest/index_documents.py:101) stores `filepath` as `str(path.resolve())`
-- [ingest/index_documents.py](/Users/garret/Code/rag-system/ingest/index_documents.py:122) deletes by raw `str(filepath)`
-- [indexer/watcher.py](/Users/garret/Code/rag-system/indexer/watcher.py:125) passes `event.src_path` directly on delete
-- [indexer/fingerprint_store.py](/Users/garret/Code/rag-system/indexer/fingerprint_store.py:17) already normalizes paths for the fingerprint DB
+- [ingest/index_documents.py](/path/to/Code/rag-system/ingest/index_documents.py:101) stores `filepath` as `str(path.resolve())`
+- [ingest/index_documents.py](/path/to/Code/rag-system/ingest/index_documents.py:122) deletes by raw `str(filepath)`
+- [indexer/watcher.py](/path/to/Code/rag-system/indexer/watcher.py:125) passes `event.src_path` directly on delete
+- [indexer/fingerprint_store.py](/path/to/Code/rag-system/indexer/fingerprint_store.py:17) already normalizes paths for the fingerprint DB
 
 Why it happens:
 - Indexed payloads use resolved absolute paths.
@@ -44,11 +44,11 @@ Why this matters:
 - That is fine for strictly local development, but it is too easy to carry into a non-local deployment by accident.
 
 Where:
-- [settings.py](/Users/garret/Code/rag-system/settings.py:36) defaults `API_KEY` to empty
-- [settings.py](/Users/garret/Code/rag-system/settings.py:37) defaults `JWT_SECRET` to empty
-- [settings.py](/Users/garret/Code/rag-system/settings.py:39) defaults `CORS_ORIGINS` to `*`
-- [web/api_server.py](/Users/garret/Code/rag-system/web/api_server.py:86) only logs a warning when auth is disabled
-- [.env.example](/Users/garret/Code/rag-system/.env.example:15) and [.env.example](/Users/garret/Code/rag-system/.env.example:20) preserve the same insecure defaults
+- [settings.py](/path/to/Code/rag-system/settings.py:36) defaults `API_KEY` to empty
+- [settings.py](/path/to/Code/rag-system/settings.py:37) defaults `JWT_SECRET` to empty
+- [settings.py](/path/to/Code/rag-system/settings.py:39) defaults `CORS_ORIGINS` to `*`
+- [web/api_server.py](/path/to/Code/rag-system/web/api_server.py:86) only logs a warning when auth is disabled
+- [.env.example](/path/to/Code/rag-system/.env.example:15) and [.env.example](/path/to/Code/rag-system/.env.example:20) preserve the same insecure defaults
 
 What I would change:
 - Keep the current behavior for explicit local-dev mode only.
@@ -65,9 +65,9 @@ Why this matters:
 - A single client can send very large requests and tie up embedding, retrieval, reranking, and generation resources.
 
 Where:
-- [web/api_server.py](/Users/garret/Code/rag-system/web/api_server.py:161) defines `ChatRequest` with no size limits
-- [web/api_server.py](/Users/garret/Code/rag-system/web/api_server.py:172) only checks that the last message is non-empty
-- [web/api_server.py](/Users/garret/Code/rag-system/web/api_server.py:215) and [web/api_server.py](/Users/garret/Code/rag-system/web/api_server.py:263) push work into the executor once accepted
+- [web/api_server.py](/path/to/Code/rag-system/web/api_server.py:161) defines `ChatRequest` with no size limits
+- [web/api_server.py](/path/to/Code/rag-system/web/api_server.py:172) only checks that the last message is non-empty
+- [web/api_server.py](/path/to/Code/rag-system/web/api_server.py:215) and [web/api_server.py](/path/to/Code/rag-system/web/api_server.py:263) push work into the executor once accepted
 
 Recommendation:
 - Cap question length at the API boundary.
@@ -81,8 +81,8 @@ This is a practical DoS issue, not just neatness.
 ### 1. Duplicate SQLite store setup should be factored out
 
 Where:
-- [web/user_store.py](/Users/garret/Code/rag-system/web/user_store.py:18)
-- [indexer/fingerprint_store.py](/Users/garret/Code/rag-system/indexer/fingerprint_store.py:22)
+- [web/user_store.py](/path/to/Code/rag-system/web/user_store.py:18)
+- [indexer/fingerprint_store.py](/path/to/Code/rag-system/indexer/fingerprint_store.py:22)
 
 What is duplicated:
 - thread-local connection handling
@@ -100,10 +100,10 @@ Why this is worth it:
 ### 2. File/path eligibility logic is spread across watcher and ingestion
 
 Where:
-- [ingest/index_documents.py](/Users/garret/Code/rag-system/ingest/index_documents.py:53)
-- [indexer/watcher.py](/Users/garret/Code/rag-system/indexer/watcher.py:97)
-- [indexer/watcher.py](/Users/garret/Code/rag-system/indexer/watcher.py:104)
-- [ingest/cleanup_stale.py](/Users/garret/Code/rag-system/ingest/cleanup_stale.py:26)
+- [ingest/index_documents.py](/path/to/Code/rag-system/ingest/index_documents.py:53)
+- [indexer/watcher.py](/path/to/Code/rag-system/indexer/watcher.py:97)
+- [indexer/watcher.py](/path/to/Code/rag-system/indexer/watcher.py:104)
+- [ingest/cleanup_stale.py](/path/to/Code/rag-system/ingest/cleanup_stale.py:26)
 
 Recommendation:
 - Centralize:
@@ -119,8 +119,8 @@ Why this is worth it:
 ### 3. `ask()` and `ask_stream_sync()` duplicate the same control flow
 
 Where:
-- [api/query_rag.py](/Users/garret/Code/rag-system/api/query_rag.py:74)
-- [api/query_rag.py](/Users/garret/Code/rag-system/api/query_rag.py:94)
+- [api/query_rag.py](/path/to/Code/rag-system/api/query_rag.py:74)
+- [api/query_rag.py](/path/to/Code/rag-system/api/query_rag.py:94)
 
 What is duplicated:
 - retrieve chunks
@@ -140,11 +140,11 @@ Why this is worth it:
 
 ## Lower-priority notes
 
-### JWTs are stored in `localStorage`
+### JWTs are stored in an HttpOnly cookie
 
 Where:
-- [web/index.html](/Users/garret/Code/rag-system/web/index.html:280)
-- [web/index.html](/Users/garret/Code/rag-system/web/index.html:319)
+- [web/index.html](/path/to/Code/rag-system/web/index.html:280)
+- [web/index.html](/path/to/Code/rag-system/web/index.html:319)
 
 Assessment:
 - This is not the first thing I would fix here.

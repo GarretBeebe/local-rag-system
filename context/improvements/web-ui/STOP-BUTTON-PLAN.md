@@ -60,7 +60,7 @@ button.stop:hover { background: #962828; }
 **HTML** — add stop button inside `.input-bar` (currently line 261):
 ```html
 <button id="send-btn" class="primary">Send</button>
-<button id="stop-btn" class="stop" style="display:none">Stop</button>
+<button id="stop-btn" class="stop" hidden>Stop</button>
 ```
 
 **JS variable declarations** — after existing `const sendBtn`:
@@ -71,8 +71,8 @@ let _abortCtl = null;
 
 **`sendMessage()`** — at the start, swap buttons and create controller:
 ```js
-sendBtn.style.display = 'none';
-stopBtn.style.display = '';
+sendBtn.hidden = true;
+stopBtn.hidden = false;
 _abortCtl = new AbortController();
 let wasStopped = false;
 ```
@@ -87,7 +87,7 @@ Replace the generic `catch` with an `AbortError`-aware handler:
     thinking.remove();
     if (assistantDiv) {
       const suffix = document.createElement('span');
-      suffix.style.cssText = 'color:#888;font-style:italic;font-size:0.82em;margin-left:0.4em;';
+      suffix.className = 'stopped-suffix';
       suffix.textContent = '[stopped]';
       assistantDiv.appendChild(suffix);
     } else {
@@ -105,8 +105,8 @@ Restore buttons in `finally`:
 } finally {
   _abortCtl = null;
   sendBtn.disabled = false;
-  sendBtn.style.display = '';
-  stopBtn.style.display = 'none';
+  sendBtn.hidden = false;
+  stopBtn.hidden = true;
   if (!wasStopped) inputEl.focus();
 }
 ```

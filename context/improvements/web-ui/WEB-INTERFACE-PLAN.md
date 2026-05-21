@@ -59,7 +59,7 @@ Browser                          Server
   │                                │  jwt.encode({sub: username,
   │  {token: <JWT>}        ◄──────  │              exp: now + 8h})
   │                                │
-  │  store JWT in localStorage     │
+  │  set JWT in an HttpOnly cookie     │
   │                                │
   │  GET /v1/models                │
   │  Authorization: Bearer <JWT> ► │  jwt.decode() + check username still in DB
@@ -153,11 +153,11 @@ No `AUTH_USERS` env var — credentials live in the DB only.
 Login form: username + password fields.
 
 Flow:
-1. On load, check `localStorage` for a stored JWT; if present attempt `GET /v1/models`.
+1. On load, attempt `GET /v1/models`; the browser sends the HttpOnly cookie automatically.
 2. If `401` or no JWT stored, show the login form.
-3. On submit, `POST /auth/login` with credentials; store returned JWT in `localStorage`.
+3. On submit, `POST /auth/login` with credentials; accept the HttpOnly session cookie returned by the server.
 4. On success, show the chat UI.
-5. On any subsequent `401` (expired or revoked token), clear `localStorage` and re-show the form.
+5. On any subsequent `401` (expired or revoked token), re-show the login form.
 
 ### Credential management
 
@@ -274,10 +274,10 @@ requires a container restart per change, and hashes are exposed via
   just unstyled. Mitigation: vendor the script into `web/` if needed.
 - **Streaming in older browsers**: `fetch` + `ReadableStream` works in all
   modern browsers. Not a concern for a local tool.
-- **Credentials in transit**: When accessed via `ai.spoonscloud.duckdns.org`,
+- **Credentials in transit**: When accessed via `ai.example.internal`,
   credentials transit over TLS (Caddy). When accessed via `localhost`, traffic
   is on loopback — acceptable.
-- **JWT stored in localStorage**: Readable by JS on the page. Since there is
+- **JWT stored in HttpOnly cookie**: Not readable by JS on the page. Since there is
   no third-party JS (only the optional CDN script), the attack surface is
   minimal. Vendoring `marked.js` eliminates it entirely.
 
@@ -290,7 +290,7 @@ requires a container restart per change, and hashes are exposed via
 5. No new containers, no build step, no new dependencies beyond `marked.js` (client) and `passlib[bcrypt]` + `PyJWT` (server)
 6. Machine clients using `Authorization: Bearer <API_KEY>` continue to work unchanged
 7. Web UI users can log in with username and password; `POST /auth/login` returns a JWT; invalid credentials return 401
-8. JWT is stored in `localStorage` and sent as `Authorization: Bearer <jwt>` on subsequent requests — bcrypt runs once per session, not per request
+8. JWT is stored in an HttpOnly cookie and sent as `Authorization: Bearer <jwt>` on subsequent requests — bcrypt runs once per session, not per request
 9. After JWT expiry (default 8h), the next request returns 401 and the login form reappears
 10. Revoking a user via `manage_users.py remove <username>` invalidates their JWT on the next request without restarting the container or affecting other users
 11. With both `API_KEY` and `JWT_SECRET` unset: server runs open (local dev preserved)
