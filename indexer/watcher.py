@@ -228,7 +228,11 @@ def main() -> None:
     cleanup_stale(accessible_roots)
     initial_scan(watch_path_pairs, handler)
     gc.collect()
-    ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
+    if sys.platform == "linux":
+        try:
+            ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
+        except OSError:
+            pass
 
     observer = PollingObserver(timeout=WATCHER_POLL_INTERVAL_SECONDS)
     for entry, path in watch_path_pairs:

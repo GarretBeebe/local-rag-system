@@ -6,10 +6,12 @@ from settings import DATA_DIR
 DB_PATH = DATA_DIR / "index_state.sqlite3"
 
 _store = SqliteStore(DB_PATH)
+_db_initialized = False
 
 
 def init_db() -> None:
     """Initialize the index state table and default version row."""
+    global _db_initialized
     conn = _store.conn
     with conn:
         conn.execute("""
@@ -25,11 +27,13 @@ def init_db() -> None:
             VALUES('documents', 0, strftime('%s','now'))
             """
         )
+    _db_initialized = True
 
 
 def get_index_version() -> int:
     """Return the current document index version."""
-    init_db()
+    if not _db_initialized:
+        init_db()
     conn = _store.conn
     with conn:
         row = conn.execute(
@@ -40,7 +44,8 @@ def get_index_version() -> int:
 
 def bump_index_version() -> int:
     """Increment and return the document index version."""
-    init_db()
+    if not _db_initialized:
+        init_db()
     conn = _store.conn
     with conn:
         conn.execute(

@@ -79,7 +79,7 @@ def test_login_first_attempt_passes():
 
 
 def test_login_at_limit_is_rejected(monkeypatch):
-    monkeypatch.setattr(rl, "LOGIN_RATE_MAX", 2)
+    monkeypatch.setattr(rl, "RATE_MAX_LOGIN_REQUESTS", 2)
 
     async def run():
         await check_login_rate_limit("1.2.3.4")

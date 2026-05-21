@@ -6,8 +6,6 @@ from collections import defaultdict
 
 from settings import RATE_MAX_LOGIN_REQUESTS, RATE_MAX_REQUESTS, RATE_WINDOW_SECONDS
 
-LOGIN_RATE_MAX = RATE_MAX_LOGIN_REQUESTS
-
 _rate_buckets: dict[str, list[float]] = defaultdict(list)
 _login_rate_buckets: dict[str, list[float]] = defaultdict(list)
 _rate_lock = asyncio.Lock()
@@ -33,7 +31,7 @@ async def check_rate_limit(
 
 async def check_login_rate_limit(ip: str) -> bool:
     """Return True if the login attempt is within the login rate limit."""
-    return await check_rate_limit(ip, buckets=_login_rate_buckets, max_requests=LOGIN_RATE_MAX)
+    return await check_rate_limit(ip, buckets=_login_rate_buckets, max_requests=RATE_MAX_LOGIN_REQUESTS)
 
 
 async def _sweep_expired(buckets: dict[str, list[float]]) -> None:

@@ -29,10 +29,10 @@ class KeywordIndex:
     def __init__(self, refresh_interval: int = KEYWORD_REFRESH_INTERVAL):
         self._lock = threading.Lock()
         self._refresh_interval = refresh_interval
-        self.docs: list = []
-        self.payloads: list = []
-        self.ids: list = []
-        self.bm25: BM25Okapi | None = None
+        self._docs: list[list[str]] = []
+        self._payloads: list[dict[str, Any]] = []
+        self._ids: list[str | int] = []
+        self._bm25: BM25Okapi | None = None
         self.known_filenames: set[str] = set()
         self._last_seen_version: int | None = None
 
@@ -72,7 +72,7 @@ class KeywordIndex:
         bm25 = BM25Okapi(docs) if docs else None
         elapsed = time.monotonic() - t0
         with self._lock:
-            self.docs, self.payloads, self.ids, self.bm25 = docs, payloads, ids, bm25
+            self._docs, self._payloads, self._ids, self._bm25 = docs, payloads, ids, bm25
             self.known_filenames = filenames
         logger.info("KeywordIndex built: %d docs in %.2fs", len(docs), elapsed)
 
@@ -96,7 +96,7 @@ class KeywordIndex:
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
-            bm25, ids, payloads = self.bm25, self.ids, self.payloads
+            bm25, ids, payloads = self._bm25, self._ids, self._payloads
         if bm25 is None:
             return []
         tokens = query.lower().split()

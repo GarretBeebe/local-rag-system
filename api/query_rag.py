@@ -15,30 +15,17 @@ Can be run directly as a script for interactive querying:
 
 import logging
 import threading
-import time
 from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import api.ollama_client as ollama_client
 from api.retrieval import Chunk, RetrievalError, retrieve_best
-from settings import GEN_MODEL, RAG_TIMING
+from api.timing import timed as _timed
+from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
-
-
-@contextmanager
-def _timed(label: str):
-    if not RAG_TIMING:
-        yield
-        return
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        logger.debug("%s: %.3fs", label, time.perf_counter() - start)
 
 _NO_CONTEXT_REPLY = "No relevant context found in the vector store yet."
 _RETRIEVAL_UNAVAILABLE_STRICT = (
@@ -97,8 +84,6 @@ Context:
 
 Question:
 {question}
-
-Answer:
 """
 
 
@@ -141,9 +126,6 @@ def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "a
 
     with _timed("generate"):
         answer = ollama_client.generate(prepared.prompt or question, model).strip()
-
-    if "Answer:" in answer:
-        answer = answer.split("Answer:", 1)[1].strip()
 
     return answer + prepared.sources
 

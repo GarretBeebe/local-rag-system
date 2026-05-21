@@ -66,7 +66,12 @@ def generate(prompt: str, model: str, timeout: float = OLLAMA_GENERATE_TIMEOUT_S
     r = _post_with_retry(
         "/api/generate", json=_generate_payload(model, prompt, stream=False), timeout=timeout
     )
-    return r.json()["response"]
+    data = r.json()
+    if "response" not in data:
+        raise RuntimeError(
+            f"Ollama generate missing 'response' field: {data.get('error', data)}"
+        )
+    return data["response"]
 
 
 def stream_generate(

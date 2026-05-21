@@ -15,8 +15,6 @@ import logging
 import math
 import re
 import threading
-import time
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,13 +23,13 @@ from sentence_transformers import CrossEncoder
 
 from api.embed import embed
 from api.keyword_index import KeywordIndex
+from api.timing import timed as _timed
 from settings import (
     COLLECTION,
     FINAL_K,
     MMR_ENABLED,
     MMR_K,
     MMR_LAMBDA_MULT,
-    RAG_TIMING,
     RECALL_K,
     RERANK_MODEL,
     get_qdrant_client,
@@ -52,17 +50,6 @@ class Chunk:
     rerank_score: float | None = field(default=None)
     vector: list[float] | None = field(default=None)
 
-
-@contextmanager
-def _timed(label: str):
-    if not RAG_TIMING:
-        yield
-        return
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        logger.debug("%s: %.3fs", label, time.perf_counter() - start)
 
 _reranker: CrossEncoder | None = None
 _reranker_lock = threading.Lock()
