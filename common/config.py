@@ -12,8 +12,11 @@ def load_yaml_config(path: Path, *, allow_empty: bool = False) -> dict[str, Any]
     Raises the underlying file/YAML exceptions. Raises ValueError for empty configs
     unless allow_empty is true.
     """
-    with path.open() as f:
-        config = yaml.safe_load(f)
+    try:
+        with path.open() as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Config file contains invalid YAML — {path}: {e}") from e
     if config is None:
         if allow_empty:
             return {}

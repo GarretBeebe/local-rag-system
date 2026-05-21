@@ -10,14 +10,13 @@ def test_embed_passes_configured_timeout_to_http_call(monkeypatch):
 
     captured = {}
 
-    def fake_post(path, **kwargs):
+    def fake_post_with_retry(path, **kwargs):
         captured["timeout"] = kwargs.get("timeout")
         resp = MagicMock()
-        resp.raise_for_status.return_value = None
         resp.json.return_value = {"embedding": [0.1] * 768}
         return resp
 
-    monkeypatch.setattr("api.embed.ollama_client.post", fake_post)
+    monkeypatch.setattr("api.embed.ollama_client.post_with_retry", fake_post_with_retry)
     embed("hello world")
     assert captured["timeout"] == OLLAMA_EMBED_TIMEOUT_SECONDS
 
@@ -36,7 +35,7 @@ def test_generate_passes_configured_timeout_to_http_call(monkeypatch):
         resp.json.return_value = {"response": "ok"}
         return resp
 
-    monkeypatch.setattr("api.ollama_client._post_with_retry", fake_post_with_retry)
+    monkeypatch.setattr("api.ollama_client.post_with_retry", fake_post_with_retry)
     ollama_client.generate("test prompt", "test-model")
     assert captured["timeout"] == OLLAMA_GENERATE_TIMEOUT_SECONDS
 

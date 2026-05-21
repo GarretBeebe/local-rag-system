@@ -27,7 +27,7 @@ def get(path: str, **kwargs: Any) -> requests.Response:
     return _session.get(f"{OLLAMA_BASE_URL}{path}", **kwargs)
 
 
-def _post_with_retry(path: str, **kwargs: Any) -> requests.Response:
+def post_with_retry(path: str, **kwargs: Any) -> requests.Response:
     """POST with up to _MAX_RETRIES retries on 5xx responses."""
     url = f"{OLLAMA_BASE_URL}{path}"
     last_exc: Exception | None = None
@@ -63,7 +63,7 @@ def _generate_payload(model: str, prompt: str, *, stream: bool) -> dict[str, Any
 
 def generate(prompt: str, model: str, timeout: float = OLLAMA_GENERATE_TIMEOUT_SECONDS) -> str:
     """Return a complete generated response from Ollama."""
-    r = _post_with_retry(
+    r = post_with_retry(
         "/api/generate", json=_generate_payload(model, prompt, stream=False), timeout=timeout
     )
     data = r.json()

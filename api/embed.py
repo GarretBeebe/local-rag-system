@@ -13,8 +13,6 @@ to batch embed all chunks per file in one request.
 
 import logging
 
-from requests import RequestException
-
 import api.ollama_client as ollama_client
 from settings import EMBED_MODEL, MAX_EMBED_CHARS, OLLAMA_EMBED_TIMEOUT_SECONDS
 
@@ -33,15 +31,11 @@ def embed(text: str) -> list[float]:
         )
         text = text[:MAX_EMBED_CHARS]
 
-    try:
-        response = ollama_client.post(
-            "/api/embeddings",
-            json={"model": EMBED_MODEL, "prompt": text},
-            timeout=OLLAMA_EMBED_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-    except RequestException as e:
-        raise RuntimeError(f"Embedding request failed: {e}") from e
+    response = ollama_client.post_with_retry(
+        "/api/embeddings",
+        json={"model": EMBED_MODEL, "prompt": text},
+        timeout=OLLAMA_EMBED_TIMEOUT_SECONDS,
+    )
 
     try:
         data = response.json()

@@ -39,7 +39,7 @@ def get_index_version() -> int:
         row = conn.execute(
             "SELECT version FROM index_state WHERE name='documents'"
         ).fetchone()
-    return int(row[0]) if row else 0
+    return int(row[0])
 
 
 def bump_index_version() -> int:

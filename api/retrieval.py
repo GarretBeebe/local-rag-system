@@ -146,7 +146,7 @@ def mmr_select(
     Only candidates that include a dense vector are considered; keyword-only
     results without vectors should be filtered out by the caller.
     """
-    def mmr_score(c, selected):
+    def mmr_score(c: Chunk, selected: list[Chunk]) -> float:
         sim_to_query = cosine(question_vec, c.vector)
         diversity_penalty = (
             max(cosine(c.vector, s.vector) for s in selected)

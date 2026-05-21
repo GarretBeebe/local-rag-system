@@ -108,7 +108,7 @@ def _get_rag_concurrency() -> asyncio.Semaphore:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _RAG_EXECUTOR, _RAG_CONCURRENCY
     _RAG_EXECUTOR = ThreadPoolExecutor(max_workers=RAG_EXECUTOR_WORKERS)
     _RAG_CONCURRENCY = asyncio.Semaphore(RAG_CONCURRENCY_LIMIT)
@@ -370,7 +370,7 @@ async def _rag_stream_response(
 
 @app.get("/v1/models")
 @app.get("/models")
-def models():
+def models() -> dict[str, Any]:
     try:
         resp = ollama_client.get("/api/tags", timeout=OLLAMA_MODEL_LIST_TIMEOUT_SECONDS)
         resp.raise_for_status()
@@ -382,7 +382,7 @@ def models():
 
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
-async def chat(request: Request, req: ChatRequest):
+async def chat(request: Request, req: ChatRequest) -> Response:
     validate_chat_request(req)
     question = extract_question_from_messages(req.messages)
     rag_mode = resolve_rag_mode(req)
@@ -398,12 +398,12 @@ async def chat(request: Request, req: ChatRequest):
 
 
 @app.get("/healthz")
-def healthz():
+def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/")
-def root():
+def root() -> RedirectResponse:
     return RedirectResponse(url="/ui/")
 
 
