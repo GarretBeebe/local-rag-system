@@ -38,13 +38,17 @@ logging.basicConfig(
 def load_config() -> dict:
     try:
         with open(CONFIG_PATH) as f:
-            return yaml.safe_load(f)
+            config = yaml.safe_load(f)
     except FileNotFoundError:
         logging.error("Config file not found: %s", CONFIG_PATH)
         sys.exit(1)
     except yaml.YAMLError as e:
         logging.error("Failed to parse config file %s: %s", CONFIG_PATH, e)
         sys.exit(1)
+    if config is None:
+        logging.error("Config file is empty: %s", CONFIG_PATH)
+        sys.exit(1)
+    return config
 
 
 def sha256_file(path: Path) -> str:
