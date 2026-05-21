@@ -6,6 +6,7 @@ from common.paths import (
     has_allowed_extension,
     is_indexable_path,
     matches_ignore_pattern,
+    normalize_extensions,
     normalize_path,
 )
 
@@ -42,6 +43,10 @@ def test_has_allowed_extension_case_insensitive():
 
 def test_has_allowed_extension_no_extension():
     assert not has_allowed_extension("Makefile", {".md", ".txt"})
+
+
+def test_normalize_extensions_returns_lowercase_frozenset():
+    assert normalize_extensions([".MD", ".Txt"]) == frozenset({".md", ".txt"})
 
 
 # --- matches_ignore_pattern ---

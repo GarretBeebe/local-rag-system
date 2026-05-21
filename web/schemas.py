@@ -6,7 +6,6 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from common.types import RagMode
-
 from settings import (
     MAX_CHAT_CONTENT_ITEMS,
     MAX_CHAT_MESSAGE_CHARS,

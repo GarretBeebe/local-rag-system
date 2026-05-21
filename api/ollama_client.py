@@ -101,6 +101,8 @@ def stream_generate(
             except json.JSONDecodeError:
                 logger.warning("Ollama stream: skipping malformed line: %r", line[:120])
                 continue
+            if data.get("error"):
+                raise RuntimeError(f"Ollama stream error: {data['error']}")
             if data.get("response"):
                 yield data["response"]
             if data.get("done"):

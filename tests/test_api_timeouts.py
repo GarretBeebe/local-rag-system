@@ -41,6 +41,24 @@ def test_generate_passes_configured_timeout_to_http_call(monkeypatch):
     assert captured["timeout"] == OLLAMA_GENERATE_TIMEOUT_SECONDS
 
 
+def test_stream_generate_raises_on_ollama_error_payload(monkeypatch):
+    """Ollama can report stream failures as 200 JSON events with an error field."""
+    import pytest
+
+    from api import ollama_client
+
+    response = MagicMock()
+    response.ok = True
+    response.iter_lines.return_value = ['{"error":"model load failed"}']
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+
+    monkeypatch.setattr("api.ollama_client._session.post", lambda *a, **kw: response)
+
+    with pytest.raises(RuntimeError, match="model load failed"):
+        list(ollama_client.stream_generate("test prompt", "test-model"))
+
+
 def test_models_endpoint_passes_configured_timeout(monkeypatch):
     """models() must forward OLLAMA_MODEL_LIST_TIMEOUT_SECONDS to the Ollama HTTP call."""
     import web.api_server as srv

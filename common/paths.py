@@ -10,9 +10,19 @@ def normalize_path(path: str | Path) -> str:
     return str(Path(path).expanduser().resolve())
 
 
+def normalize_extensions(extensions: Iterable[str]) -> frozenset[str]:
+    """Return a lowercase immutable extension set for repeated path checks."""
+    return frozenset(ext.lower() for ext in extensions)
+
+
 def has_allowed_extension(path: str | Path, allowed_extensions: Iterable[str]) -> bool:
     """Return True when the path suffix is in the allowed extension set."""
-    return Path(path).suffix.lower() in {ext.lower() for ext in allowed_extensions}
+    normalized = (
+        allowed_extensions
+        if isinstance(allowed_extensions, frozenset)
+        else normalize_extensions(allowed_extensions)
+    )
+    return Path(path).suffix.lower() in normalized
 
 
 def matches_ignore_pattern(path: str | Path, ignore_patterns: Iterable[str]) -> bool:

@@ -15,7 +15,6 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Literal
 
 from qdrant_client.models import (
     Distance,
@@ -28,7 +27,8 @@ from qdrant_client.models import (
 from tqdm import tqdm
 
 from api.embed import embed
-from common.paths import has_allowed_extension, normalize_path
+from common.paths import has_allowed_extension, normalize_extensions, normalize_path
+from common.types import IndexDecision
 from indexer.fingerprint_store import delete_hash
 from ingest.chunkers import chunk_document
 from settings import (
@@ -41,6 +41,7 @@ from settings import (
 )
 
 logger = logging.getLogger(__name__)
+_ALLOWED_EXTENSIONS = normalize_extensions(ALLOWED_EXTENSIONS)
 
 
 def ensure_collection() -> None:
@@ -56,7 +57,7 @@ def load_files() -> list[Path]:
     return [
         p
         for p in DOCS_PATH.rglob("*")
-        if p.is_file() and has_allowed_extension(p, ALLOWED_EXTENSIONS)
+        if p.is_file() and has_allowed_extension(p, _ALLOWED_EXTENSIONS)
     ]
 
 
@@ -99,7 +100,7 @@ def _embed_chunks(path: Path, chunks: list[str], document_id: str) -> list[Point
     return points
 
 
-def _upsert_chunks(path: Path, points: list[PointStruct]) -> Literal["indexed", "failed"]:
+def _upsert_chunks(path: Path, points: list[PointStruct]) -> IndexDecision:
     """Upsert replacement points then delete stale vectors for path."""
     filepath = normalize_path(path)
     index_version = str(uuid.uuid4())
@@ -110,7 +111,7 @@ def _upsert_chunks(path: Path, points: list[PointStruct]) -> Literal["indexed", 
         get_qdrant_client().upsert(collection_name=COLLECTION, points=points)
     except Exception as e:
         logger.error("Upsert failed for %s: %s", path, e)
-        return "failed"
+        return IndexDecision.FAILED
     try:
         get_qdrant_client().delete(
             collection_name=COLLECTION,
@@ -126,11 +127,11 @@ def _upsert_chunks(path: Path, points: list[PointStruct]) -> Literal["indexed", 
             "Stale vector cleanup failed for %s — fingerprint not updated, "
             "will retry on next poll: %s", path, e,
         )
-        return "failed"
-    return "indexed"
+        return IndexDecision.FAILED
+    return IndexDecision.INDEXED
 
 
-def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
+def index_file(path: Path) -> IndexDecision:
     ensure_collection()
     normalized_path = normalize_path(path)
 
@@ -138,7 +139,7 @@ def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
     text = _read_file(path)
     read_elapsed = time.monotonic() - read_started
     if text is None:
-        return "skipped"
+        return IndexDecision.SKIPPED
 
     chunk_started = time.monotonic()
     chunks = chunk_document(path, text)
@@ -147,7 +148,7 @@ def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
 
     if not chunks:
         logger.info("No non-empty chunks for %s", path)
-        return "skipped"
+        return IndexDecision.SKIPPED
 
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, normalized_path))
 
@@ -156,18 +157,18 @@ def index_file(path: Path) -> Literal["indexed", "skipped", "failed"]:
         points = _embed_chunks(path, chunks, document_id)
     except Exception as e:
         logger.error("Embedding failed for %s: %s", path, e)
-        return "failed"
+        return IndexDecision.FAILED
     embed_elapsed = time.monotonic() - embed_started
 
     if not points:
         logger.warning("No valid chunks to index for %s", path)
-        return "failed"
+        return IndexDecision.FAILED
 
     upsert_started = time.monotonic()
     result = _upsert_chunks(path, points)
     upsert_elapsed = time.monotonic() - upsert_started
 
-    if result == "indexed":
+    if result == IndexDecision.INDEXED:
         logger.info(
             "Indexed %s: %d chunks — read=%.2fs chunk=%.2fs embed=%.2fs upsert=%.2fs",
             path, len(points), read_elapsed, chunk_elapsed, embed_elapsed, upsert_elapsed,

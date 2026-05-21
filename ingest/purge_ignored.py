@@ -16,9 +16,8 @@ import logging
 import sys
 from pathlib import Path
 
-import yaml
-
-from common.paths import is_indexable_path, normalize_path
+from common.config import load_yaml_config
+from common.paths import is_indexable_path, normalize_extensions, normalize_path
 from indexer.fingerprint_store import init_db, list_all_paths
 from ingest.index_documents import remove_indexed_document
 from settings import ALLOWED_EXTENSIONS, CONFIG_PATH
@@ -31,8 +30,7 @@ class NoAccessibleWatchRootsError(RuntimeError):
 
 
 def load_config(path: Path) -> dict:
-    with path.open() as f:
-        return yaml.safe_load(f) or {}
+    return load_yaml_config(path, allow_empty=True)
 
 
 def _iter_accessible_roots(config: dict) -> list[Path]:
@@ -51,7 +49,7 @@ def _is_under_roots(path: Path, roots: list[Path]) -> bool:
 
 
 def find_ignored_paths(config: dict) -> list[str]:
-    allowed_ext = set(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
+    allowed_ext = normalize_extensions(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
     ignore_patterns = config.get("ignore_patterns", [])
     watch_paths = config.get("watch_paths", [])
 

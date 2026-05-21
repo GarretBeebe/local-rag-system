@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from common.types import IndexDecision
+
 
 @pytest.fixture()
 def existing_file(tmp_path: Path) -> Path:
@@ -24,9 +26,12 @@ def changed_hashes(existing_file: Path, monkeypatch) -> Path:
 def test_missing_path_returns_missing(tmp_path: Path, monkeypatch) -> None:
     """Non-existent path returns MISSING without calling index_file."""
     index_calls: list[Path] = []
-    monkeypatch.setattr("indexer.watcher.index_file", lambda p: index_calls.append(p) or "indexed")
+    monkeypatch.setattr(
+        "indexer.watcher.index_file",
+        lambda p: index_calls.append(p) or IndexDecision.INDEXED,
+    )
 
-    from indexer.watcher import IndexDecision, _index_if_changed
+    from indexer.watcher import _index_if_changed
 
     result = _index_if_changed(str(tmp_path / "no_such_file.txt"))
 
@@ -39,9 +44,12 @@ def test_unchanged_hash_skips_indexing(existing_file: Path, monkeypatch) -> None
     monkeypatch.setattr("indexer.watcher.sha256_file", lambda p: "abc123")
     monkeypatch.setattr("indexer.watcher.get_hash", lambda p: "abc123")
     index_calls: list[Path] = []
-    monkeypatch.setattr("indexer.watcher.index_file", lambda p: index_calls.append(p) or "indexed")
+    monkeypatch.setattr(
+        "indexer.watcher.index_file",
+        lambda p: index_calls.append(p) or IndexDecision.INDEXED,
+    )
 
-    from indexer.watcher import IndexDecision, _index_if_changed
+    from indexer.watcher import _index_if_changed
 
     result = _index_if_changed(str(existing_file))
 
@@ -51,13 +59,13 @@ def test_unchanged_hash_skips_indexing(existing_file: Path, monkeypatch) -> None
 
 def test_indexed_outcome_updates_fingerprint(changed_hashes: Path, monkeypatch) -> None:
     """'indexed' outcome calls upsert_hash, bumps index version, and returns INDEXED."""
-    monkeypatch.setattr("indexer.watcher.index_file", lambda p: "indexed")
+    monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.INDEXED)
     upserted: list[tuple[str, str]] = []
     bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
     monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
-    from indexer.watcher import IndexDecision, _index_if_changed
+    from indexer.watcher import _index_if_changed
 
     result = _index_if_changed(str(changed_hashes))
 
@@ -68,13 +76,13 @@ def test_indexed_outcome_updates_fingerprint(changed_hashes: Path, monkeypatch) 
 
 def test_skipped_outcome_does_not_update_fingerprint(changed_hashes: Path, monkeypatch) -> None:
     """'skipped' outcome does not call upsert_hash and returns SKIPPED."""
-    monkeypatch.setattr("indexer.watcher.index_file", lambda p: "skipped")
+    monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.SKIPPED)
     upserted: list[tuple[str, str]] = []
     bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
     monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
-    from indexer.watcher import IndexDecision, _index_if_changed
+    from indexer.watcher import _index_if_changed
 
     result = _index_if_changed(str(changed_hashes))
 
@@ -85,13 +93,13 @@ def test_skipped_outcome_does_not_update_fingerprint(changed_hashes: Path, monke
 
 def test_failed_outcome_does_not_update_fingerprint(changed_hashes: Path, monkeypatch) -> None:
     """'failed' outcome does not call upsert_hash and returns FAILED."""
-    monkeypatch.setattr("indexer.watcher.index_file", lambda p: "failed")
+    monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.FAILED)
     upserted: list[tuple[str, str]] = []
     bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
     monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
-    from indexer.watcher import IndexDecision, _index_if_changed
+    from indexer.watcher import _index_if_changed
 
     result = _index_if_changed(str(changed_hashes))
 
@@ -109,7 +117,7 @@ def test_index_file_exception_is_logged_and_returns_failed(
         lambda p: (_ for _ in ()).throw(RuntimeError("index exploded")),
     )
 
-    from indexer.watcher import IndexDecision, _index_if_changed
+    from indexer.watcher import _index_if_changed
 
     with caplog.at_level(logging.ERROR):
         result = _index_if_changed(str(changed_hashes))

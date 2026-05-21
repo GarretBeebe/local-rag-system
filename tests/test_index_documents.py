@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from common.types import IndexDecision
+
 
 @pytest.fixture()
 def tmp_doc(tmp_path: Path) -> Path:
@@ -29,7 +31,7 @@ def test_embed_failure_returns_failed(tmp_doc, monkeypatch):
     from ingest.index_documents import index_file
     result = index_file(tmp_doc)
 
-    assert result == "failed"
+    assert result == IndexDecision.FAILED
     assert upsert_calls == [], "upsert must not be called when embedding fails"
 
 
@@ -44,4 +46,4 @@ def test_embed_failure_does_not_update_fingerprint(tmp_doc, monkeypatch):
     monkeypatch.setattr("ingest.index_documents.get_qdrant_client", MagicMock)
 
     from ingest.index_documents import index_file
-    assert index_file(tmp_doc) == "failed"
+    assert index_file(tmp_doc) == IndexDecision.FAILED

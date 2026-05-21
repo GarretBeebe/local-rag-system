@@ -17,17 +17,18 @@ import sys
 import threading
 import time
 from collections.abc import Generator
-from enum import StrEnum
+from contextlib import suppress
 from pathlib import Path
 from queue import Queue
 
-import yaml
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
+from common.config import load_yaml_config
 from common.index_state import bump_index_version
 from common.index_state import init_db as init_index_state
-from common.paths import is_indexable_path, normalize_path
+from common.paths import is_indexable_path, normalize_extensions, normalize_path
+from common.types import IndexDecision
 from indexer.fingerprint_store import get_hash, init_db, upsert_hash
 from ingest.cleanup_stale import cleanup_stale
 from ingest.index_documents import index_file, remove_indexed_document
@@ -42,18 +43,16 @@ logger = logging.getLogger(__name__)
 
 def load_config() -> dict:
     try:
-        with open(CONFIG_PATH) as f:
-            config = yaml.safe_load(f)
+        return load_yaml_config(CONFIG_PATH)
     except FileNotFoundError:
         logger.error("Config file not found: %s", CONFIG_PATH)
         sys.exit(1)
-    except yaml.YAMLError as e:
+    except ValueError as e:
+        logger.error("%s", e)
+        sys.exit(1)
+    except Exception as e:
         logger.error("Failed to parse config file %s: %s", CONFIG_PATH, e)
         sys.exit(1)
-    if config is None:
-        logger.error("Config file is empty: %s", CONFIG_PATH)
-        sys.exit(1)
-    return config
 
 
 def sha256_file(path: Path) -> str:
@@ -62,14 +61,6 @@ def sha256_file(path: Path) -> str:
         while chunk := f.read(8192):
             h.update(chunk)
     return h.hexdigest()
-
-
-class IndexDecision(StrEnum):
-    MISSING = "missing"
-    UNCHANGED = "unchanged"
-    INDEXED = "indexed"
-    SKIPPED = "skipped"
-    FAILED = "failed"
 
 
 def _index_if_changed(path: str) -> IndexDecision:
@@ -84,11 +75,11 @@ def _index_if_changed(path: str) -> IndexDecision:
             return IndexDecision.UNCHANGED
         logger.info("Indexing %s", path)
         outcome = index_file(p)
-        if outcome == "indexed":
+        if outcome == IndexDecision.INDEXED:
             upsert_hash(path, file_hash)
             bump_index_version()
             return IndexDecision.INDEXED
-        if outcome == "skipped":
+        if outcome == IndexDecision.SKIPPED:
             logger.info("Skipped %s — fingerprint not updated", path)
             return IndexDecision.SKIPPED
         logger.warning("Failed to index %s — fingerprint not updated", path)
@@ -130,7 +121,9 @@ class IndexWorker:
 class WatchHandler(FileSystemEventHandler):
 
     def __init__(self, config: dict, worker: IndexWorker, required_mount_roots: list[Path]):
-        self.allowed_ext = set(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
+        self.allowed_ext = normalize_extensions(
+            config.get("allowed_extensions", ALLOWED_EXTENSIONS)
+        )
         self.ignore = config.get("ignore_patterns", [])
         self.worker = worker
         self.required_mount_roots = required_mount_roots
@@ -229,10 +222,8 @@ def main() -> None:
     initial_scan(watch_path_pairs, handler)
     gc.collect()
     if sys.platform == "linux":
-        try:
+        with suppress(OSError):
             ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
-        except OSError:
-            pass
 
     observer = PollingObserver(timeout=WATCHER_POLL_INTERVAL_SECONDS)
     for entry, path in watch_path_pairs:

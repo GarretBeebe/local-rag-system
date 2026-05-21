@@ -31,11 +31,11 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles
 
 import api.ollama_client as ollama_client
-from common.types import RagMode
 import api.retrieval
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import Chunk, rerank
+from common.types import RagMode
 from settings import (
     ALLOW_INSECURE_LOCALONLY,
     API_KEY,
