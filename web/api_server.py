@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import bcrypt as _bcrypt
 from fastapi import FastAPI, HTTPException, Request
@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles
 
 import api.ollama_client as ollama_client
+from common.types import RagMode
 import api.retrieval
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
@@ -206,7 +207,7 @@ async def _security_headers_middleware(request: Request, call_next: Callable[...
 async def _run_rag_with_timeout(
     question: str,
     model: str,
-    rag_mode: Literal["strict", "augmented"] = "augmented",
+    rag_mode: RagMode = "augmented",
     timeout: float = RAG_REQUEST_TIMEOUT_SECONDS,
 ) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work."""
@@ -254,7 +255,7 @@ async def _run_rag_with_timeout(
 async def _start_stream_worker(
     question: str,
     model: str,
-    rag_mode: Literal["strict", "augmented"],
+    rag_mode: RagMode,
     loop: asyncio.AbstractEventLoop,
 ) -> tuple[asyncio.Queue[str | Exception | None], threading.Event, Future[None]]:
     """Acquire the semaphore, schedule the stream worker, and return (queue, cancel_event, future).
@@ -328,7 +329,7 @@ async def _stream_queue_events(
 async def _rag_stream_response(
     question: str,
     model: str,
-    rag_mode: Literal["strict", "augmented"] = "augmented",
+    rag_mode: RagMode = "augmented",
     http_request: Request | None = None,
 ) -> AsyncIterator[str]:
     """Bridge ask_stream_sync (sync generator) to an async SSE generator."""

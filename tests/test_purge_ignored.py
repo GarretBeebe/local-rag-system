@@ -33,8 +33,7 @@ def test_inaccessible_roots_prevents_deletion(monkeypatch, tmp_path):
     monkeypatch.setattr("ingest.purge_ignored.list_all_paths", lambda: ["/some/file.txt"])
 
     deleted = []
-    monkeypatch.setattr("ingest.purge_ignored.delete_document", lambda p: deleted.append(p))
-    monkeypatch.setattr("ingest.purge_ignored.delete_hash", lambda p: deleted.append(p))
+    monkeypatch.setattr("ingest.purge_ignored.remove_indexed_document", lambda p: deleted.append(p))
 
     with pytest.raises(NoAccessibleWatchRootsError):
         purge_ignored(config_path, apply=True)

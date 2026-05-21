@@ -28,15 +28,16 @@ from watchdog.observers.polling import PollingObserver
 from common.index_state import bump_index_version
 from common.index_state import init_db as init_index_state
 from common.paths import is_indexable_path, normalize_path
-from indexer.fingerprint_store import delete_hash, get_hash, init_db, upsert_hash
+from indexer.fingerprint_store import get_hash, init_db, upsert_hash
 from ingest.cleanup_stale import cleanup_stale
-from ingest.index_documents import delete_document, index_file
+from ingest.index_documents import index_file, remove_indexed_document
 from settings import ALLOWED_EXTENSIONS, CONFIG_PATH, WATCHER_POLL_INTERVAL_SECONDS
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 
 def load_config() -> dict:
@@ -44,13 +45,13 @@ def load_config() -> dict:
         with open(CONFIG_PATH) as f:
             config = yaml.safe_load(f)
     except FileNotFoundError:
-        logging.error("Config file not found: %s", CONFIG_PATH)
+        logger.error("Config file not found: %s", CONFIG_PATH)
         sys.exit(1)
     except yaml.YAMLError as e:
-        logging.error("Failed to parse config file %s: %s", CONFIG_PATH, e)
+        logger.error("Failed to parse config file %s: %s", CONFIG_PATH, e)
         sys.exit(1)
     if config is None:
-        logging.error("Config file is empty: %s", CONFIG_PATH)
+        logger.error("Config file is empty: %s", CONFIG_PATH)
         sys.exit(1)
     return config
 
@@ -81,19 +82,19 @@ def _index_if_changed(path: str) -> IndexDecision:
         prev_hash = get_hash(path)
         if prev_hash == file_hash:
             return IndexDecision.UNCHANGED
-        logging.info("Indexing %s", path)
+        logger.info("Indexing %s", path)
         outcome = index_file(p)
         if outcome == "indexed":
             upsert_hash(path, file_hash)
             bump_index_version()
             return IndexDecision.INDEXED
         if outcome == "skipped":
-            logging.info("Skipped %s — fingerprint not updated", path)
+            logger.info("Skipped %s — fingerprint not updated", path)
             return IndexDecision.SKIPPED
-        logging.warning("Failed to index %s — fingerprint not updated", path)
+        logger.warning("Failed to index %s — fingerprint not updated", path)
         return IndexDecision.FAILED
     except Exception as e:
-        logging.error("Error indexing %s: %s", path, e)
+        logger.error("Error indexing %s: %s", path, e)
         return IndexDecision.FAILED
 
 
@@ -160,15 +161,14 @@ class WatchHandler(FileSystemEventHandler):
             return
         broken_root = self._broken_mount_for(Path(event.src_path))
         if broken_root is not None:
-            logging.warning(
+            logger.warning(
                 "Skipping delete for %s — root %s is empty, likely a broken bind mount. "
                 "Fix the mount and run: docker compose restart watcher",
                 event.src_path, broken_root,
             )
             return
         normalized_path = normalize_path(event.src_path)
-        delete_document(normalized_path)
-        delete_hash(normalized_path)
+        remove_indexed_document(normalized_path)
         bump_index_version()
 
 
@@ -176,7 +176,7 @@ def _iter_watch_paths(watch_paths: list) -> Generator[tuple[dict, Path], None, N
     for entry in watch_paths:
         raw_path = Path(entry["path"]).expanduser()
         if not raw_path.exists():
-            logging.warning("Skipping missing path: %s", raw_path)
+            logger.warning("Skipping missing path: %s", raw_path)
             continue
         yield entry, Path(normalize_path(raw_path))
 
@@ -184,28 +184,28 @@ def _iter_watch_paths(watch_paths: list) -> Generator[tuple[dict, Path], None, N
 def validate_required_mounts(required_mounts: list[dict]) -> list[Path]:
     """Validate bind mount roots at startup. Exits with code 1 if any are missing or empty."""
     if not required_mounts:
-        logging.warning("No required_mounts configured — skipping mount validation")
+        logger.warning("No required_mounts configured — skipping mount validation")
         return []
     roots = []
     for entry in required_mounts:
         root = Path(normalize_path(entry["path"]))
         if not root.exists():
-            logging.error(
+            logger.error(
                 "Required mount %s does not exist — exiting so Docker can restart", root
             )
             sys.exit(1)
         if entry.get("require_non_empty", False) and not any(root.iterdir()):
-            logging.error(
+            logger.error(
                 "Required mount %s is empty — exiting so Docker can restart", root
             )
             sys.exit(1)
-        logging.info("Mount %s OK", root)
+        logger.info("Mount %s OK", root)
         roots.append(root)
     return roots
 
 
 def initial_scan(watch_path_pairs: list[tuple[dict, Path]], handler: WatchHandler) -> None:
-    logging.info("Starting initial scan")
+    logger.info("Starting initial scan")
     for entry, root in watch_path_pairs:
         pattern = "**/*" if entry.get("recursive", True) else "*"
         for f in root.glob(pattern):
@@ -236,7 +236,7 @@ def main() -> None:
 
     observer = PollingObserver(timeout=WATCHER_POLL_INTERVAL_SECONDS)
     for entry, path in watch_path_pairs:
-        logging.info("Watching %s", path)
+        logger.info("Watching %s", path)
         observer.schedule(handler, str(path), recursive=entry.get("recursive", True))
 
     observer.start()

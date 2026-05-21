@@ -5,6 +5,8 @@ from typing import Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
+from common.types import RagMode
+
 from settings import (
     MAX_CHAT_CONTENT_ITEMS,
     MAX_CHAT_MESSAGE_CHARS,
@@ -30,10 +32,10 @@ class ChatRequest(BaseModel):
     model: str = Field(min_length=1, max_length=MAX_MODEL_NAME_CHARS)
     messages: list[ChatMessage] = Field(min_length=1, max_length=MAX_CHAT_MESSAGES)
     stream: bool | None = False
-    rag_mode: Literal["strict", "augmented"] | None = None
+    rag_mode: RagMode | None = None
 
 
-def resolve_rag_mode(req: ChatRequest) -> Literal["strict", "augmented"]:
+def resolve_rag_mode(req: ChatRequest) -> RagMode:
     return req.rag_mode or RAG_MODE
 
 

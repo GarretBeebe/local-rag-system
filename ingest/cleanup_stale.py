@@ -12,8 +12,8 @@ import logging
 from pathlib import Path
 
 from common.index_state import bump_index_version
-from indexer.fingerprint_store import delete_hash, init_db, list_all_paths
-from ingest.index_documents import delete_document
+from indexer.fingerprint_store import init_db, list_all_paths
+from ingest.index_documents import remove_indexed_document
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,7 @@ def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
             continue
         if not p.exists():
             logger.info("Removing stale entry: %s", filepath)
-            delete_document(filepath)
-            delete_hash(filepath)
+            remove_indexed_document(filepath)
             removed += 1
     if removed:
         bump_index_version()

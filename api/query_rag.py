@@ -18,11 +18,12 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import api.ollama_client as ollama_client
 from api.retrieval import Chunk, RetrievalError, retrieve_best
 from api.timing import timed as _timed
+from common.types import RagMode
 from settings import GEN_MODEL
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def _resolve_source(payload: dict[str, Any]) -> str:
 def build_prompt(
     question: str,
     chunks: list[Chunk],
-    rag_mode: Literal["strict", "augmented"] = "augmented",
+    rag_mode: RagMode = "augmented",
 ) -> str:
     context_blocks = []
     for i, chunk in enumerate(chunks, start=1):
@@ -100,7 +101,7 @@ def _format_sources(chunks: list[Chunk]) -> str:
 
 def _prepare_query(
     question: str,
-    rag_mode: Literal["strict", "augmented"] = "augmented",
+    rag_mode: RagMode = "augmented",
 ) -> _PreparedQuery:
     try:
         chunks = retrieve_best(question)
@@ -119,7 +120,7 @@ def _prepare_query(
     )
 
 
-def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "augmented") -> str:
+def ask(question: str, model: str, rag_mode: RagMode = "augmented") -> str:
     prepared = _prepare_query(question, rag_mode)
     if prepared.direct_reply is not None:
         return prepared.direct_reply
@@ -133,7 +134,7 @@ def ask(question: str, model: str, rag_mode: Literal["strict", "augmented"] = "a
 def ask_stream_sync(
     question: str,
     model: str,
-    rag_mode: Literal["strict", "augmented"] = "augmented",
+    rag_mode: RagMode = "augmented",
     cancel: threading.Event | None = None,
 ) -> Iterator[str]:
     """Sync generator: retrieves context then streams generation chunks from Ollama."""

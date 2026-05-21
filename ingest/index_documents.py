@@ -2,9 +2,10 @@
 Document ingestion pipeline: loads files, splits them into overlapping chunks,
 generates embeddings via Ollama, and upserts the results into Qdrant.
 
-Exposes two public functions used by the filesystem watcher:
-  - index_file(path)          — chunk, embed, and upsert a single file
-  - delete_document(filepath) — remove all vectors belonging to a file
+Exposes public functions used by the filesystem watcher:
+  - index_file(path)                — chunk, embed, and upsert a single file
+  - remove_indexed_document(path)   — delete vectors and fingerprint for a file
+  - delete_document(filepath)       — remove only Qdrant vectors for a file
 
 Can also be run directly as a script to batch-index the documents directory:
   python ingest/index_documents.py
@@ -28,6 +29,7 @@ from tqdm import tqdm
 
 from api.embed import embed
 from common.paths import has_allowed_extension, normalize_path
+from indexer.fingerprint_store import delete_hash
 from ingest.chunkers import chunk_document
 from settings import (
     ALLOWED_EXTENSIONS,
@@ -182,6 +184,12 @@ def delete_document(filepath: Path | str) -> None:
             must=[FieldCondition(key="filepath", match=MatchValue(value=normalized_path))]
         ),
     )
+
+
+def remove_indexed_document(filepath: Path | str) -> None:
+    """Delete Qdrant vectors and fingerprint record for a document."""
+    delete_document(filepath)
+    delete_hash(normalize_path(filepath))
 
 
 def main() -> None:

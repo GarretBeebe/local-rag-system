@@ -19,8 +19,8 @@ from pathlib import Path
 import yaml
 
 from common.paths import is_indexable_path, normalize_path
-from indexer.fingerprint_store import delete_hash, init_db, list_all_paths
-from ingest.index_documents import delete_document
+from indexer.fingerprint_store import init_db, list_all_paths
+from ingest.index_documents import remove_indexed_document
 from settings import ALLOWED_EXTENSIONS, CONFIG_PATH
 
 logger = logging.getLogger(__name__)
@@ -89,8 +89,7 @@ def purge_ignored(config_path: Path, *, apply: bool) -> int:
     for filepath in ignored:
         logger.info("%s indexed ignored path: %s", action, filepath)
         if apply:
-            delete_document(filepath)
-            delete_hash(filepath)
+            remove_indexed_document(filepath)
 
     logger.info(
         "%s complete — %d indexed ignored path(s) %s",
