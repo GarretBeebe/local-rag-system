@@ -9,6 +9,8 @@ Watch paths, allowed extensions, and ignore patterns are configured in
 config/watcher_config.container.yaml (set via CONFIG_PATH env var).
 """
 
+import ctypes
+import gc
 import hashlib
 import logging
 import sys
@@ -220,6 +222,8 @@ def main() -> None:
     handler = WatchHandler(config, worker, required_mount_roots)
     cleanup_stale(accessible_roots)
     initial_scan(watch_path_pairs, handler)
+    gc.collect()
+    ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
 
     observer = PollingObserver(timeout=WATCHER_POLL_INTERVAL_SECONDS)
     for entry, path in watch_path_pairs:
