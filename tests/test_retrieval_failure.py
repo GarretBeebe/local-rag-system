@@ -35,7 +35,7 @@ def test_prepare_query_strict_mode_returns_unavailable_reply(monkeypatch):
 
 def test_prepare_query_augmented_mode_includes_degraded_notice(monkeypatch):
     """In augmented mode, a RetrievalError must allow fallback with a degradation notice."""
-    from api.query_rag import _PromptQuery, _prepare_query
+    from api.query_rag import _prepare_query, _PromptQuery
 
     monkeypatch.setattr(
         "api.query_rag.retrieve_best",
@@ -50,7 +50,7 @@ def test_prepare_query_augmented_mode_includes_degraded_notice(monkeypatch):
 
 def test_prepare_query_empty_result_uses_no_context_path(monkeypatch):
     """A successful Qdrant search returning no chunks must not be confused with a failure."""
-    from api.query_rag import _NO_CONTEXT_REPLY, _DirectReply, _PromptQuery, _prepare_query
+    from api.query_rag import _NO_CONTEXT_REPLY, _DirectReply, _prepare_query, _PromptQuery
 
     monkeypatch.setattr("api.query_rag.retrieve_best", lambda *a, **kw: [])
 

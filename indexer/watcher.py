@@ -28,7 +28,12 @@ from watchdog.observers.polling import PollingObserver
 from common.config import load_yaml_config
 from common.index_state import bump_index_version
 from common.index_state import init_db as init_index_state
-from common.paths import is_indexable_path, matches_ignore_pattern, normalize_extensions, normalize_path
+from common.paths import (
+    is_indexable_path,
+    matches_ignore_pattern,
+    normalize_extensions,
+    normalize_path,
+)
 from common.types import IndexDecision
 from indexer.fingerprint_store import get_hash, init_db, upsert_hash
 from ingest.cleanup_stale import cleanup_stale
@@ -121,7 +126,12 @@ class IndexWorker:
 
 class WatchHandler(FileSystemEventHandler):
 
-    def __init__(self, config: dict[str, Any], worker: IndexWorker, required_mount_roots: list[Path]):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        worker: IndexWorker,
+        required_mount_roots: list[Path],
+    ):
         self.allowed_ext = normalize_extensions(
             config.get("allowed_extensions", ALLOWED_EXTENSIONS)
         )
@@ -166,7 +176,9 @@ class WatchHandler(FileSystemEventHandler):
         bump_index_version()
 
 
-def _iter_watch_paths(watch_paths: list[dict[str, Any]]) -> Generator[tuple[dict[str, Any], Path], None, None]:
+def _iter_watch_paths(
+    watch_paths: list[dict[str, Any]],
+) -> Generator[tuple[dict[str, Any], Path], None, None]:
     for entry in watch_paths:
         raw_path = Path(entry["path"]).expanduser()
         if not raw_path.exists():
