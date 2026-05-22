@@ -1,9 +1,12 @@
 """
-SQLite-backed user store for web UI authentication.
+SQLite-backed user and session store for web UI authentication.
 
-Stores bcrypt password hashes keyed by username in data/users.sqlite3,
+Stores bcrypt password hashes and opaque session tokens in data/users.sqlite3,
 which is persisted via the rag-data Docker volume.
 """
+
+import secrets
+import time
 
 from common.sqlite_store import SqliteStore
 from settings import DATA_DIR
@@ -21,6 +24,13 @@ def init_db() -> None:
                 username TEXT PRIMARY KEY,
                 password_hash TEXT NOT NULL,
                 created_at REAL NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                expires_at REAL NOT NULL
             )
         """)
 
@@ -60,3 +70,37 @@ def list_users() -> list[str]:
     with conn:
         rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
     return [row[0] for row in rows]
+
+
+def create_session(username: str, expiry_hours: int) -> str:
+    token = secrets.token_hex(32)
+    expires_at = time.time() + expiry_hours * 3600
+    conn = _store.conn
+    with conn:
+        conn.execute(
+            "INSERT INTO sessions(token, username, expires_at) VALUES(?, ?, ?)",
+            (token, username, expires_at),
+        )
+    return token
+
+
+def validate_session(token: str) -> str | None:
+    conn = _store.conn
+    with conn:
+        row = conn.execute(
+            "SELECT username FROM sessions WHERE token=? AND expires_at > ?",
+            (token, time.time()),
+        ).fetchone()
+    return row[0] if row else None
+
+
+def delete_session(token: str) -> None:
+    conn = _store.conn
+    with conn:
+        conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+
+
+def purge_expired_sessions() -> None:
+    conn = _store.conn
+    with conn:
+        conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (time.time(),))

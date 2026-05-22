@@ -36,9 +36,8 @@ if RAG_MODE not in ("strict", "augmented"):
 MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 API_KEY = os.environ.get("API_KEY", "")
-JWT_SECRET = os.environ.get("JWT_SECRET", "")
+SESSION_EXPIRY_HOURS = int(os.environ.get("SESSION_EXPIRY_HOURS", "8"))
 ALLOW_INSECURE_LOCALONLY = os.environ.get("ALLOW_INSECURE_LOCALONLY", "").lower() in ("1", "true")
-JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
 _raw_trusted_proxies = os.environ.get("TRUSTED_PROXY_IPS", "")
 TRUSTED_PROXY_IPS: set[str] = {ip.strip() for ip in _raw_trusted_proxies.split(",") if ip.strip()}
 _raw_cors_origins = os.environ.get("CORS_ORIGINS", "")

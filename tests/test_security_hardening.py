@@ -4,9 +4,6 @@ import web.api_server as srv
 
 
 def test_ui_static_mount_does_not_serve_backend_source(monkeypatch):
-    monkeypatch.setattr(srv, 'API_KEY', 'required-token')
-    monkeypatch.setattr(srv, 'JWT_SECRET', '')
-
     with TestClient(srv.app) as client:
         assert client.get('/ui/').status_code == 200
         assert client.get('/ui/app.js').status_code == 200
@@ -15,8 +12,6 @@ def test_ui_static_mount_does_not_serve_backend_source(monkeypatch):
 
 
 def test_cookie_token_is_accepted_when_authorization_header_missing(monkeypatch):
-    monkeypatch.setattr(srv, 'API_KEY', '')
-    monkeypatch.setattr(srv, 'JWT_SECRET', 'secret')
     monkeypatch.setattr(srv, 'is_valid_token', lambda token: token == 'cookie-token')
     monkeypatch.setattr(srv.ollama_client, 'get', lambda *args, **kwargs: _FakeModelsResponse())
 
@@ -28,9 +23,6 @@ def test_cookie_token_is_accepted_when_authorization_header_missing(monkeypatch)
 
 
 def test_root_requires_auth_when_auth_configured(monkeypatch):
-    monkeypatch.setattr(srv, 'API_KEY', 'required-token')
-    monkeypatch.setattr(srv, 'JWT_SECRET', '')
-
     with TestClient(srv.app) as client:
         r = client.get('/')
 
@@ -38,9 +30,6 @@ def test_root_requires_auth_when_auth_configured(monkeypatch):
 
 
 def test_healthz_remains_available_for_container_healthcheck(monkeypatch):
-    monkeypatch.setattr(srv, 'API_KEY', 'required-token')
-    monkeypatch.setattr(srv, 'JWT_SECRET', '')
-
     with TestClient(srv.app) as client:
         r = client.get('/healthz')
 
@@ -57,11 +46,9 @@ class _FakeModelsResponse:
 
 
 def test_login_sets_httponly_cookie(monkeypatch):
-    monkeypatch.setattr(srv, 'JWT_SECRET', 'test-secret')
-    monkeypatch.setattr(srv, 'JWT_EXPIRY_HOURS', 8)
     monkeypatch.setattr(srv.user_store, 'get_hash', lambda username: 'stored-hash')
     monkeypatch.setattr(srv._bcrypt, 'checkpw', lambda password, stored: True)
-    monkeypatch.setattr(srv, 'create_token', lambda username: 'jwt-token')
+    monkeypatch.setattr(srv, 'create_session', lambda username: 'opaque-session-token')
 
     with TestClient(srv.app) as client:
         r = client.post('/auth/login', json={'username': 'alice', 'password': 'secret'})
@@ -69,7 +56,7 @@ def test_login_sets_httponly_cookie(monkeypatch):
     assert r.status_code == 200
     assert r.json() == {'ok': True}
     cookie = r.headers['set-cookie']
-    assert 'rag_token=jwt-token' in cookie
+    assert 'rag_token=opaque-session-token' in cookie
     assert 'HttpOnly' in cookie
     assert 'Max-Age=28800' in cookie
 

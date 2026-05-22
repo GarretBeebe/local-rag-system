@@ -132,7 +132,7 @@ The ingestion pipeline supports:
     │
     ├── web/
     │   ├── api_server.py            ← app creation, routes, lifespan
-    │   ├── auth.py                  ← token validation (API key + JWT)
+    │   ├── auth.py                  ← token validation (API key + session)
     │   ├── rate_limit.py            ← sliding-window rate limiter
     │   ├── schemas.py               ← Pydantic request/response models
     │   ├── openai_compat.py         ← SSE and OpenAI response formatting
@@ -212,10 +212,10 @@ Leave `API_KEY` empty only if you explicitly opt into local-only insecure mode:
 
     ALLOW_INSECURE_LOCALONLY=true
 
-To enable the built-in web UI with username/password login, set a JWT signing secret:
+The built-in web UI uses session-based authentication — no signing secret is needed.
+Optionally set the session lifetime (default 8 hours):
 
-    JWT_SECRET=<generate with: openssl rand -hex 32>
-    JWT_EXPIRY_HOURS=8    # optional, default 8
+    SESSION_EXPIRY_HOURS=8
 
 By default, `CORS_ORIGINS` is empty. Set it only when you need browser access from a
 different origin:
@@ -454,7 +454,7 @@ Endpoints
 | `GET` | `/healthz` | Container health check |
 | `GET` | `/` | Redirects to `/ui/` when authenticated; protected like the API |
 | `GET` | `/ui/` | Built-in web chat UI assets (no auth required to load) |
-| `POST` | `/auth/login` | Exchange username/password for an HttpOnly JWT session cookie |
+| `POST` | `/auth/login` | Exchange username/password for an HttpOnly session cookie |
 | `POST` | `/auth/logout` | Clear the browser session cookie |
 | `GET` | `/v1/models` | List available models |
 | `GET` | `/models` | Alias for `/v1/models` |
@@ -473,15 +473,7 @@ under `/ui/`. Markdown rendering uses vendored copies of `marked.js` and
 
 ## Setup
 
-**1. Add `JWT_SECRET` to `.env`** (required — login returns 503 without it):
-
-    JWT_SECRET=<output of: openssl rand -hex 32>
-
-**2. Recreate or rebuild the api container** to pick up the new variable:
-
-    docker compose up -d --build api
-
-**3. Add users** via the management CLI:
+**1. Add users** via the management CLI:
 
     docker exec -it rag-api python manage_users.py add <username>
     # prompts for password, bcrypt-hashes it, writes to data/users.sqlite3
@@ -502,9 +494,10 @@ Removing a user invalidates their active session on the next request.
 | Behind reverse proxy | `https://<your-domain>/ui/` |
 
 Log in with the username and password set via `manage_users.py`. The UI
-sets a JWT-backed HttpOnly cookie (default 8-hour expiry). Browser JavaScript
-cannot read this cookie; the browser sends it automatically on same-origin API
-requests. When it expires, the login form reappears automatically.
+sets an HttpOnly session cookie (default 8-hour expiry, configurable via
+`SESSION_EXPIRY_HOURS`). Browser JavaScript cannot read this cookie; the browser
+sends it automatically on same-origin API requests. When it expires, the login
+form reappears automatically. Logging out immediately invalidates the session.
 
 Machine clients (`API_KEY` bearer token) are unaffected — both auth
 mechanisms work simultaneously.
@@ -721,8 +714,8 @@ Runtime controls:
 | Control | Detail |
 | --- | --- |
 | API key auth | Set `API_KEY` in `.env`. Protected API endpoints accept `Authorization: Bearer <key>` and compare it with `hmac.compare_digest` (timing-safe). Exempt paths are `/healthz`, `/favicon.ico`, `/ui/*`, `/auth/login`, and `/auth/logout`. |
-| Web UI auth | Set `JWT_SECRET` in `.env`. Browser users log in with username/password; server sets an 8-hour JWT-backed HttpOnly cookie. Credentials are stored as bcrypt hashes in `data/users.sqlite3`. Login returns 503 if `JWT_SECRET` is unset. |
-| Auth disabled local mode | If both `API_KEY` and `JWT_SECRET` are unset, startup fails unless `ALLOW_INSECURE_LOCALONLY=true` is set explicitly. Use only for local development. |
+| Web UI auth | Browser users log in with username/password; server creates an opaque session token stored in `data/users.sqlite3` and sets an HttpOnly cookie. No signing secret required. Session lifetime is configurable via `SESSION_EXPIRY_HOURS` (default 8 hours). Logout immediately revokes the session. Credentials are stored as bcrypt hashes. |
+| Auth disabled local mode | Startup succeeds without any auth unless `ALLOW_INSECURE_LOCALONLY=true` is set; all non-exempt endpoints return 401 by default. Set `ALLOW_INSECURE_LOCALONLY=true` only for local development. |
 | Rate limiting | General API requests are limited to 30 requests per minute per IP. `/auth/login` uses a separate tighter 10 attempts per minute per-IP bucket. Returns `429` when exceeded. |
 | Trusted proxy IPs | Set `TRUSTED_PROXY_IPS` (comma-separated) to the IP(s) of your reverse proxy. When set, `X-Forwarded-For` is used to identify the real client IP for rate limiting; unrecognised or malformed values fall back to the peer address. |
 | Security headers | All responses include `Content-Security-Policy` without inline script/style allowances, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`. |

@@ -38,22 +38,20 @@ from api.retrieval import Chunk, rerank
 from common.types import RagMode
 from settings import (
     ALLOW_INSECURE_LOCALONLY,
-    API_KEY,
     CORS_ORIGINS,
     GEN_MODEL,
-    JWT_EXPIRY_HOURS,
-    JWT_SECRET,
     OLLAMA_MODEL_LIST_TIMEOUT_SECONDS,
     OLLAMA_WARMUP_TIMEOUT_SECONDS,
     RAG_CONCURRENCY_LIMIT,
     RAG_EXECUTOR_WORKERS,
     RAG_REQUEST_TIMEOUT_SECONDS,
+    SESSION_EXPIRY_HOURS,
     STREAM_TIMEOUT_SECONDS,
     TRUSTED_PROXY_IPS,
     WARM_MODELS_ON_STARTUP,
 )
 from web import user_store
-from web.auth import create_token, is_valid_token
+from web.auth import create_session, is_valid_token
 from web.openai_compat import build_chat_response, make_stream_chunk, model_entry
 from web.rate_limit import check_login_rate_limit, check_rate_limit, start_sweep_tasks
 from web.schemas import (
@@ -114,14 +112,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _RAG_CONCURRENCY = asyncio.Semaphore(RAG_CONCURRENCY_LIMIT)
 
     user_store.init_db()
+    user_store.purge_expired_sessions()
     api.retrieval.startup()
 
-    if not API_KEY and not JWT_SECRET:
-        if not ALLOW_INSECURE_LOCALONLY:
-            raise RuntimeError(
-                "Authentication is required for the API. Set API_KEY or JWT_SECRET, "
-                "or explicitly set ALLOW_INSECURE_LOCALONLY=true for local development."
-            )
+    if ALLOW_INSECURE_LOCALONLY:
         logger.warning(
             "Authentication is DISABLED for local-only mode because "
             "ALLOW_INSECURE_LOCALONLY=true"
@@ -171,7 +165,7 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]) -
     if not await check_rate_limit(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
-    if API_KEY or JWT_SECRET:
+    if not ALLOW_INSECURE_LOCALONLY:
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         if not token:
             token = request.cookies.get(_AUTH_COOKIE, "")
@@ -409,8 +403,6 @@ def root() -> RedirectResponse:
 
 @app.post("/auth/login")
 async def login(request: Request, response: Response, credentials: LoginRequest) -> dict[str, bool]:
-    if not JWT_SECRET:
-        raise HTTPException(status_code=503, detail="Web UI login not configured")
     stored = user_store.get_hash(credentials.username)
     # Always run bcrypt to prevent username enumeration via timing differences.
     hash_to_check = stored.encode() if stored else _DUMMY_HASH
@@ -419,7 +411,7 @@ async def login(request: Request, response: Response, credentials: LoginRequest)
     )
     if not stored or not password_matches:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_token(credentials.username)
+    token = create_session(credentials.username)
     secure_cookie = (
         request.url.scheme == "https"
         or request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip() == "https"
@@ -430,14 +422,17 @@ async def login(request: Request, response: Response, credentials: LoginRequest)
         httponly=True,
         secure=secure_cookie,
         samesite="lax",
-        max_age=JWT_EXPIRY_HOURS * 3600,
+        max_age=SESSION_EXPIRY_HOURS * 3600,
         path="/",
     )
     return {"ok": True}
 
 
 @app.post("/auth/logout")
-async def logout(response: Response) -> dict[str, bool]:
+async def logout(request: Request, response: Response) -> dict[str, bool]:
+    token = request.cookies.get(_AUTH_COOKIE, "")
+    if token:
+        user_store.delete_session(token)
     response.delete_cookie(_AUTH_COOKIE, path="/")
     return {"ok": True}
 

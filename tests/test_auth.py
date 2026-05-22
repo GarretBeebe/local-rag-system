@@ -1,94 +1,92 @@
-"""Unit tests for JWT token creation and validation."""
+"""Unit tests for opaque session creation and validation."""
 
 import time
-from datetime import UTC, datetime, timedelta
 
-import jwt as pyjwt
 import pytest
 
 import web.auth as auth_module
-from web.auth import create_token, is_valid_token
+from web import user_store
+from web.auth import create_session, is_valid_token
 
-SECRET = "test-secret-key-long-enough-for-hs256-minimum"
-ALGORITHM = "HS256"
+# ── Fixtures ──────────────────────────────────────────────────────────────────
 
-
-def make_token(
-    secret: str = SECRET,
-    sub: str = "alice",
-    expiry_hours: int = 8,
-    *,
-    expired: bool = False,
-) -> str:
-    if expired:
-        exp = datetime.now(UTC) - timedelta(hours=1)
-    else:
-        exp = datetime.now(UTC) + timedelta(hours=expiry_hours)
-    payload = {"sub": sub, "exp": exp}
-    return pyjwt.encode(payload, secret, algorithm=ALGORITHM)
+@pytest.fixture
+def fresh_db(tmp_path, monkeypatch):
+    """Reinitialize user_store against a fresh temporary database."""
+    from common.sqlite_store import SqliteStore
+    monkeypatch.setattr(user_store, "_store", SqliteStore(tmp_path / "users.sqlite3"))
+    user_store.init_db()
 
 
-def decode_token(token: str, secret: str = SECRET) -> dict:
-    return pyjwt.decode(token, secret, algorithms=[ALGORITHM])
+# ── user_store session methods ────────────────────────────────────────────────
+
+def test_create_session_returns_64_char_hex(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    token = user_store.create_session("alice", expiry_hours=8)
+    assert len(token) == 64
+    assert all(c in "0123456789abcdef" for c in token)
 
 
-# --- Raw JWT encode/decode ---
-
-def test_valid_token_decodes_cleanly():
-    token = make_token()
-    payload = decode_token(token)
-    assert payload["sub"] == "alice"
-
-
-def test_token_contains_exp_claim():
-    token = make_token()
-    payload = decode_token(token)
-    assert "exp" in payload
-
-
-def test_token_expiry_is_in_future():
-    token = make_token(expiry_hours=8)
-    payload = decode_token(token)
-    assert payload["exp"] > time.time()
-
-
-def test_different_subjects_produce_different_tokens():
-    t1 = make_token(sub="alice")
-    t2 = make_token(sub="bob")
+def test_create_session_tokens_are_unique(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    t1 = user_store.create_session("alice", expiry_hours=8)
+    t2 = user_store.create_session("alice", expiry_hours=8)
     assert t1 != t2
 
 
-def test_wrong_secret_raises():
-    token = make_token(secret="correct-secret-long-enough-for-hs256-minimum")
-    with pytest.raises(pyjwt.InvalidSignatureError):
-        decode_token(token, secret="wrong-secret-long-enough-for-hs256-minimum")
+def test_validate_session_returns_username(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    token = user_store.create_session("alice", expiry_hours=8)
+    assert user_store.validate_session(token) == "alice"
 
 
-def test_expired_token_raises():
-    token = make_token(expired=True)
-    with pytest.raises(pyjwt.ExpiredSignatureError):
-        decode_token(token)
+def test_validate_session_returns_none_for_unknown_token(fresh_db):
+    assert user_store.validate_session("no-such-token") is None
 
 
-def test_malformed_token_raises():
-    with pytest.raises(pyjwt.DecodeError):
-        decode_token("not.a.valid.token")
+def test_validate_session_returns_none_for_expired_session(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    # Insert a pre-expired session directly to avoid sleeping.
+    conn = user_store._store.conn
+    with conn:
+        conn.execute(
+            "INSERT INTO sessions(token, username, expires_at) VALUES(?, ?, ?)",
+            ("expired-token", "alice", time.time() - 3600),
+        )
+    assert user_store.validate_session("expired-token") is None
 
 
-def test_empty_token_raises():
-    with pytest.raises(pyjwt.DecodeError):
-        decode_token("")
+def test_delete_session_revokes_immediately(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    token = user_store.create_session("alice", expiry_hours=8)
+    user_store.delete_session(token)
+    assert user_store.validate_session(token) is None
 
 
-def test_tampered_payload_raises():
-    token = make_token()
-    parts = token.split(".")
-    tampered = parts[0] + "." + "dGFtcGVyZWQ" + "." + parts[2]
-    with pytest.raises(pyjwt.InvalidSignatureError):
-        decode_token(tampered)
+def test_delete_session_is_safe_for_unknown_token(fresh_db):
+    user_store.delete_session("nonexistent")  # must not raise
 
 
-# --- is_valid_token: API key path ---
+def test_purge_expired_sessions_removes_stale_rows(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    conn = user_store._store.conn
+    with conn:
+        conn.execute(
+            "INSERT INTO sessions(token, username, expires_at) VALUES(?, ?, ?)",
+            ("stale-token", "alice", time.time() - 1),
+        )
+    user_store.purge_expired_sessions()
+    assert user_store.validate_session("stale-token") is None
+
+
+def test_purge_expired_sessions_preserves_valid_rows(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    token = user_store.create_session("alice", expiry_hours=8)
+    user_store.purge_expired_sessions()
+    assert user_store.validate_session(token) == "alice"
+
+
+# ── is_valid_token: API key path ──────────────────────────────────────────────
 
 def test_is_valid_token_correct_api_key(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "my-secret-key")
@@ -97,6 +95,7 @@ def test_is_valid_token_correct_api_key(monkeypatch):
 
 def test_is_valid_token_wrong_api_key(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "my-secret-key")
+    monkeypatch.setattr(auth_module.user_store, "validate_session", lambda t: None)
     assert is_valid_token("wrong-key") is False
 
 
@@ -105,78 +104,47 @@ def test_is_valid_token_empty_with_api_key(monkeypatch):
     assert is_valid_token("") is False
 
 
-# --- is_valid_token: JWT path ---
+# ── is_valid_token: session path ──────────────────────────────────────────────
 
-def test_is_valid_token_valid_jwt_known_user(monkeypatch):
+def test_is_valid_token_valid_session(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "")
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
     monkeypatch.setattr(
-        auth_module.user_store, "get_hash", lambda u: "hash" if u == "alice" else None
+        auth_module.user_store, "validate_session", lambda t: "alice" if t == "good-token" else None
     )
-    assert is_valid_token(make_token(secret=SECRET, sub="alice")) is True
+    assert is_valid_token("good-token") is True
 
 
-def test_is_valid_token_valid_jwt_unknown_user(monkeypatch):
+def test_is_valid_token_expired_session(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "")
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module.user_store, "get_hash", lambda u: None)
-    assert is_valid_token(make_token(secret=SECRET, sub="alice")) is False
+    monkeypatch.setattr(auth_module.user_store, "validate_session", lambda t: None)
+    assert is_valid_token("expired-token") is False
 
 
-def test_is_valid_token_expired_jwt(monkeypatch):
+def test_is_valid_token_unknown_session(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "")
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module.user_store, "get_hash", lambda u: "hash")
-    assert is_valid_token(make_token(secret=SECRET, expired=True)) is False
+    monkeypatch.setattr(auth_module.user_store, "validate_session", lambda t: None)
+    assert is_valid_token("unknown-token") is False
 
 
-def test_is_valid_token_tampered_jwt(monkeypatch):
+def test_is_valid_token_empty_token(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "")
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module.user_store, "get_hash", lambda u: "hash")
-    token = make_token(secret=SECRET)
-    parts = token.split(".")
-    tampered = parts[0] + "." + "dGFtcGVyZWQ" + "." + parts[2]
-    assert is_valid_token(tampered) is False
-
-
-def test_is_valid_token_empty_with_jwt_secret(monkeypatch):
-    monkeypatch.setattr(auth_module, "API_KEY", "")
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module.user_store, "get_hash", lambda u: "hash")
+    # validate_session should never be called for an empty token.
+    monkeypatch.setattr(auth_module.user_store, "validate_session", lambda t: "alice")
     assert is_valid_token("") is False
 
 
-def test_is_valid_token_no_auth_configured(monkeypatch):
-    monkeypatch.setattr(auth_module, "API_KEY", "")
-    monkeypatch.setattr(auth_module, "JWT_SECRET", "")
-    assert is_valid_token("any-token") is False
+# ── create_session ────────────────────────────────────────────────────────────
 
+def test_create_session_delegates_username_and_expiry(monkeypatch):
+    captured = {}
 
-# --- create_token ---
+    def fake_create(username, expiry_hours):
+        captured["username"] = username
+        captured["expiry_hours"] = expiry_hours
+        return "a" * 64
 
-def test_create_token_sub_claim(monkeypatch):
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module, "JWT_EXPIRY_HOURS", 8)
-    token = create_token("alice")
-    payload = decode_token(token, secret=SECRET)
-    assert payload["sub"] == "alice"
-
-
-def test_create_token_exp_in_future(monkeypatch):
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module, "JWT_EXPIRY_HOURS", 8)
-    token = create_token("alice")
-    payload = decode_token(token, secret=SECRET)
-    assert payload["exp"] > time.time()
-
-
-def test_create_token_is_valid(monkeypatch):
-    monkeypatch.setattr(auth_module, "API_KEY", "")
-    monkeypatch.setattr(auth_module, "JWT_SECRET", SECRET)
-    monkeypatch.setattr(auth_module, "JWT_EXPIRY_HOURS", 8)
-    monkeypatch.setattr(
-        auth_module.user_store, "get_hash", lambda u: "hash" if u == "alice" else None
-    )
-    token = create_token("alice")
-    assert is_valid_token(token) is True
+    monkeypatch.setattr(auth_module.user_store, "create_session", fake_create)
+    monkeypatch.setattr(auth_module, "SESSION_EXPIRY_HOURS", 8)
+    token = create_session("alice")
+    assert token == "a" * 64
+    assert captured == {"username": "alice", "expiry_hours": 8}
