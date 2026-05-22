@@ -51,7 +51,7 @@ from settings import (
     WARM_MODELS_ON_STARTUP,
 )
 from web import user_store
-from web.auth import create_session, is_valid_token
+from web.auth import create_session, is_valid_token, revoke_session
 from web.openai_compat import build_chat_response, make_stream_chunk, model_entry
 from web.rate_limit import check_login_rate_limit, check_rate_limit, start_sweep_tasks
 from web.schemas import (
@@ -68,6 +68,7 @@ _SERVER_START = int(time.time())
 _WEB_DIR = Path(__file__).parent
 _STATIC_DIR = _WEB_DIR / "static"
 _AUTH_COOKIE = "rag_token"
+_SECONDS_PER_HOUR = 3600
 # Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
 # preventing timing-based username enumeration.
 _DUMMY_HASH: bytes = _bcrypt.hashpw(b"__sentinel__", _bcrypt.gensalt())
@@ -112,7 +113,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _RAG_CONCURRENCY = asyncio.Semaphore(RAG_CONCURRENCY_LIMIT)
 
     user_store.init_db()
-    user_store.purge_expired_sessions()
+    try:
+        user_store.purge_expired_sessions()
+    except Exception as exc:
+        logger.warning("Failed to purge expired sessions on startup: %s", exc)
     api.retrieval.startup()
 
     if ALLOW_INSECURE_LOCALONLY:
@@ -412,7 +416,7 @@ async def login(request: Request, response: Response, credentials: LoginRequest)
     if not stored or not password_matches:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_session(credentials.username)
-    secure_cookie = (
+    is_secure = (
         request.url.scheme == "https"
         or request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip() == "https"
     )
@@ -420,9 +424,9 @@ async def login(request: Request, response: Response, credentials: LoginRequest)
         _AUTH_COOKIE,
         token,
         httponly=True,
-        secure=secure_cookie,
+        secure=is_secure,
         samesite="lax",
-        max_age=SESSION_EXPIRY_HOURS * 3600,
+        max_age=SESSION_EXPIRY_HOURS * _SECONDS_PER_HOUR,
         path="/",
     )
     return {"ok": True}
@@ -432,7 +436,7 @@ async def login(request: Request, response: Response, credentials: LoginRequest)
 async def logout(request: Request, response: Response) -> dict[str, bool]:
     token = request.cookies.get(_AUTH_COOKIE, "")
     if token:
-        user_store.delete_session(token)
+        revoke_session(token)
     response.delete_cookie(_AUTH_COOKIE, path="/")
     return {"ok": True}
 

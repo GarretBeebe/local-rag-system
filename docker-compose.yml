@@ -81,7 +81,7 @@ services:
       WARM_MODELS_ON_STARTUP: ${WARM_MODELS_ON_STARTUP:-false}
     volumes:
       - rag-data:/app/data
-      - hf-cache:/root/.cache/huggingface
+      - hf-cache:/app/.cache/huggingface
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 15s
@@ -111,7 +111,7 @@ services:
       RAG_MODE: ${RAG_MODE:-strict}
     volumes:
       - rag-data:/app/data
-      - hf-cache:/root/.cache/huggingface
+      - hf-cache:/app/.cache/huggingface
       - ./config/watcher_config.container.yaml:/app/config/watcher_config.container.yaml:ro
       # Mount your document directories here. See note at top of file.
       - ${NEXTCLOUD_PATH}:/watch/Nextcloud:ro

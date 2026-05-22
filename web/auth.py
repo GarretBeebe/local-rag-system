@@ -10,6 +10,10 @@ def create_session(username: str) -> str:
     return user_store.create_session(username, SESSION_EXPIRY_HOURS)
 
 
+def revoke_session(token: str) -> None:
+    user_store.delete_session(token)
+
+
 def is_valid_token(token: str) -> bool:
     if not token:
         return False
