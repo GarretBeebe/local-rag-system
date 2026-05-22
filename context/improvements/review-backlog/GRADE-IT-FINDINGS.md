@@ -1,6 +1,6 @@
 # Code Review Findings (grade-it)
 
-Last updated: 2026-05-19
+Last updated: 2026-05-22
 
 ---
 
@@ -39,6 +39,38 @@ Last updated: 2026-05-19
 `reset_collection.py` deletes the Qdrant collection but leaves `data/fingerprints.sqlite3` intact. After reset, unchanged files still have matching fingerprints, so the watcher skips them as already indexed even though their vectors no longer exist. The collection can stay empty until files change or fingerprints are manually cleared.
 
 **Fix:** Clear or invalidate the fingerprint store when the collection is reset, or add an explicit reset mode that drops both Qdrant vectors and fingerprint state together.
+
+---
+
+### Semaphore released before timed-out non-streaming worker exits
+**File:** `web/api_server.py:227-232`
+
+`_run_rag_with_timeout` schedules `ask()` in the executor and attaches
+`future.add_done_callback(lambda _f: semaphore.release())`. When
+`asyncio.wait_for` times out, it cancels the asyncio future wrapper and marks
+it done — triggering the callback and releasing the semaphore — even though the
+threadpool task cannot be cancelled and keeps running. Timed-out requests pile
+up beyond `RAG_CONCURRENCY_LIMIT` and continue consuming Ollama/reranker
+resources.
+
+**Fix:** Shield the executor future from `wait_for` cancellation, or release
+the semaphore from a wrapper that runs after `ask()` truly exits in the worker
+thread. (Related but distinct from the streaming semaphore bug above.)
+
+---
+
+### Previously indexed files leave stale vectors when they become unindexable
+**File:** `ingest/index_documents.py:141-151`, `indexer/watcher.py:88-90`
+
+`index_documents.py` returns `SKIPPED` for oversized, unreadable, or empty
+files without deleting existing Qdrant points for that path. The watcher then
+leaves the fingerprint unchanged and does not remove the old document. If a
+previously indexed file is replaced by an empty or unreadable version, the old
+content remains queryable indefinitely.
+
+**Fix:** Distinguish "never indexable" from "previously indexed, now
+unindexable". Delete existing vectors for the normalized path when current
+content should no longer be served.
 
 ---
 
@@ -231,6 +263,62 @@ The model-list endpoint hardcodes `timeout=5.0`, and warmup hardcodes `timeout=6
 
 ---
 
+### `exclude_dirs` applied to observer scheduling but not initial scan
+**File:** `indexer/watcher.py:221-227`, `indexer/watcher.py:251-255`
+
+The initial scan uses `root.glob("**/*")` and enqueues every file.
+`exclude_dirs` is only applied when scheduling `PollingObserver` watches.
+A directory excluded for polling can still be fully indexed on startup unless
+the same patterns are duplicated in `ignore_patterns`. The duplication is
+visible in `config/watcher_config.container.yaml` lines 33-58 and 77-106.
+
+**Fix:** Apply the same `exclude_dirs` pruning to the initial scan traversal, or
+pass per-watch-path `exclude_dirs` into the indexing filter so the two paths
+share one source of truth.
+
+---
+
+### Shared global `requests.Session` used across worker threads
+**File:** `api/ollama_client.py:17`
+
+One module-global `requests.Session` is shared by concurrent RAG threadpool
+workers (`web/api_server.py:111`, `227`, `275`). Concurrent `generate`,
+`stream_generate`, and `embed` calls share the same session. While
+`requests.Session` serializes on an internal lock and won't corrupt data, it
+creates a contention point and is not designed for high-concurrency sharing.
+
+**Fix:** Use `threading.local()` for one session per thread, create short-lived
+sessions per call, or switch to `httpx` with an `AsyncClient` / explicit
+connection pool.
+
+---
+
+### `KeywordIndex` refresh threads leak across lifespan restarts
+**File:** `api/keyword_index.py:47-48`, `api/retrieval.py:62-69`
+
+`retrieval.startup()` creates a new `KeywordIndex` and calls `start()` every
+time the FastAPI lifespan starts. `KeywordIndex.start()` spawns a daemon
+refresh thread with no stop mechanism and no guard against repeated calls. Test
+clients, hot reloads, or lifecycle restarts can accumulate orphaned refresh
+loops that continue scrolling Qdrant.
+
+**Fix:** Give `KeywordIndex` a stop event and joinable thread. Expose a
+`retrieval.shutdown()` function and call it from the FastAPI lifespan cleanup.
+
+---
+
+### `sendMessage()` mixes transport, SSE parsing, rendering, and UI state
+**File:** `web/static/app.js:108-218`
+
+`sendMessage()` is 111 lines doing five unrelated workflows: UI state
+transitions, HTTP streaming, SSE line parsing, Markdown rendering, and
+cancellation. The concentration makes streaming or stop-button changes risky.
+
+**Fix:** Extract `setSendingState`, `postStreamingChat`, `parseSseLines`, and
+`renderAssistantMarkdown` into focused helpers.
+
+---
+
 ### `IndexWorker._run()` mixes worker lifecycle with indexing policy
 **File:** `indexer/watcher.py:74-101`
 
@@ -258,23 +346,29 @@ The model-list endpoint hardcodes `timeout=5.0`, and warmup hardcodes `timeout=6
 ### Priority 1 — Must Fix First
 
 1. Fix streaming semaphore release on executor scheduling failure — `web/api_server.py:216-218`
-2. Stop deleting old vectors before replacement upsert succeeds — `ingest/index_documents.py:104-119`
-3. Stop trusting arbitrary `X-Forwarded-For` for rate-limit identity — `web/api_server.py:117-120`
-4. Make collection reset clear or invalidate fingerprint state — `ingest/reset_collection.py:11-15`
-5. Make `purge_ignored --apply` fail closed when no watch roots are accessible — `ingest/purge_ignored.py:49-62`
+2. Fix non-streaming semaphore released before timed-out worker exits — `web/api_server.py:227-232`
+3. Stop deleting old vectors before replacement upsert succeeds — `ingest/index_documents.py:104-119`
+4. Delete stale vectors when a previously indexed file becomes unindexable — `ingest/index_documents.py:141`, `indexer/watcher.py:88`
+5. Stop trusting arbitrary `X-Forwarded-For` for rate-limit identity — `web/api_server.py:117-120`
+6. Make collection reset clear or invalidate fingerprint state — `ingest/reset_collection.py:11-15`
+7. Make `purge_ignored --apply` fail closed when no watch roots are accessible — `ingest/purge_ignored.py:49-62`
 
 ### Priority 2 — Should Fix Next
 
 1. Put semaphore acquisition under timeout and initialize RAG executor/concurrency defensively — `web/api_server.py:70-71`, `web/api_server.py:169`
-2. Fix chat request semantics by extracting from the latest user message — `web/schemas.py:59-77`
-3. Preserve module-level Python code during chunking — `ingest/chunkers.py:95-109`
-4. Make partial embedding failures either fail the document or renumber stored chunks — `ingest/index_documents.py:75-101`
-5. Move hardcoded operational timeouts into settings — `api/ollama_client.py:64,76`, `api/embed.py:40`, `web/api_server.py:263,330`
-6. Remove import-time logging configuration from cleanup/purge scripts — `ingest/cleanup_stale.py:17`, `ingest/purge_ignored.py:25`
-7. Later design-backed fix: introduce `RetrievalUnavailable`; distinguish retrieval failure from empty results in `_prepare_query()` — `api/retrieval.py:130-132`, `api/query_rag.py:100-104`, `context/improvements/retrieval-performance/RETRIEVAL-FAILURE-HANDLING.md`
+2. Apply `exclude_dirs` during initial scan, not only observer scheduling — `indexer/watcher.py:221`
+3. Replace shared global `requests.Session` with thread-local or per-call sessions — `api/ollama_client.py:17`
+4. Add lifecycle shutdown for `KeywordIndex` refresh threads — `api/keyword_index.py:47`
+5. Fix chat request semantics by extracting from the latest user message — `web/schemas.py:59-77`
+6. Preserve module-level Python code during chunking — `ingest/chunkers.py:95-109`
+7. Make partial embedding failures either fail the document or renumber stored chunks — `ingest/index_documents.py:75-101`
+8. Move hardcoded operational timeouts into settings — `api/ollama_client.py:64,76`, `api/embed.py:40`, `web/api_server.py:263,330`
+9. Remove import-time logging configuration from cleanup/purge scripts — `ingest/cleanup_stale.py:17`, `ingest/purge_ignored.py:25`
+10. Later design-backed fix: introduce `RetrievalUnavailable`; distinguish retrieval failure from empty results in `_prepare_query()` — `api/retrieval.py:130-132`, `api/query_rag.py:100-104`, `context/improvements/retrieval-performance/RETRIEVAL-FAILURE-HANDLING.md`
 
 ### Priority 3 — Cleanup
 
-1. Move or localize the shared `timed` helper — `api/retrieval.py:51-58`, `api/query_rag.py:24`
-2. Split overloaded streaming and indexing worker functions into focused helpers — `web/api_server.py:194-257`, `indexer/watcher.py:74-101`
-3. Clean up small style and typing items from the Priority 3 table above.
+1. Break `sendMessage()` into transport, SSE parsing, rendering, and UI-state helpers — `web/static/app.js:108`
+2. Move or localize the shared `timed` helper — `api/retrieval.py:51-58`, `api/query_rag.py:24`
+3. Split overloaded streaming and indexing worker functions into focused helpers — `web/api_server.py:194-257`, `indexer/watcher.py:74-101`
+4. Clean up small style and typing items from the Priority 3 table above.
