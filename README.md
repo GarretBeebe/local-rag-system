@@ -153,103 +153,96 @@ The ingestion pipeline supports:
 
 # Requirements
 
--   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows, macOS, or Linux)
+-   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS) or Docker Engine (Linux)
 -   [Ollama](https://ollama.com) installed and running on the host
 
 ------------------------------------------------------------------------
 
-# Docker Deployment
+# Deployment
 
 Qdrant, the API server, and the filesystem watcher run in Docker.
-Ollama runs on the host for native GPU access — install it from
-[ollama.com](https://ollama.com) and make sure it is running before
-starting the stack. Works on Windows, macOS, and Linux.
+Ollama runs on the host for native GPU access.
 
-## Prerequisites
+## 1. Copy `.env`
 
--   [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS)
-    or Docker Engine (Linux)
--   [Ollama](https://ollama.com) installed and running on the host
+    cp .env.example .env
 
-## 1. Configure the filesystem watcher
+Open `.env` and fill in the values below.
 
-The watcher monitors directories for documents to index. You need to:
+**Required**
 
-**a) Update `config/watcher_config.container.yaml`** to list the paths
-you want indexed. Use the container-side mount paths (`/watch/…`):
+    QDRANT_API_KEY=<openssl rand -hex 32>
 
-    watch_paths:
-      - path: /watch/Nextcloud
-        recursive: true
-      - path: /watch/Code
-        recursive: true
+**Required — your document directories**
 
-**b) Copy `.env.example` to `.env`** and set your host paths:
-
-    # Windows
-    NEXTCLOUD_PATH=C:/Users/YourName/Nextcloud
-    CODE_PATH=C:/Users/YourName/Code
+    # Windows (WSL2 path)
+    NEXTCLOUD_PATH=/mnt/c/Users/YourName/Nextcloud
+    CODE_PATH=/mnt/c/Users/YourName/Code
 
     # Linux / macOS
     NEXTCLOUD_PATH=/home/yourname/Nextcloud
     CODE_PATH=/home/yourname/Code
 
-Set a Qdrant API key. This is required by `docker-compose.yml` so the vector
-database is not accessible unauthenticated from other containers on the Docker
-network:
+**Recommended if the API is reachable beyond localhost**
 
-    QDRANT_API_KEY=<generate with: openssl rand -hex 32>
+    API_KEY=<openssl rand -hex 32>
 
-If the API is exposed beyond localhost (e.g. behind a reverse proxy), set an API key:
-
-    API_KEY=<generate with: openssl rand -hex 32>
-
-When `API_KEY` is set, all endpoints except `GET /` require the header:
+When `API_KEY` is set, all endpoints except `/healthz` require:
 
     Authorization: Bearer <your-key>
 
-Leave `API_KEY` empty only if you explicitly opt into local-only insecure mode:
+**Optional**
 
-    ALLOW_INSECURE_LOCALONLY=true
+    CORS_ORIGINS=https://chat.example.com    # cross-origin browser access
+    TRUSTED_PROXY_IPS=192.168.1.1            # real client IP behind a reverse proxy
+    SESSION_EXPIRY_HOURS=8                   # web UI session lifetime (default: 8 h)
+    RAG_MODE=augmented                       # default query mode: strict or augmented
 
-The built-in web UI uses session-based authentication — no signing secret is needed.
-Optionally set the session lifetime (default 8 hours):
+## 2. Configure watch paths
 
-    SESSION_EXPIRY_HOURS=8
+The watcher reads `config/watcher_config.container.yaml`. The default
+config already watches `/watch/Nextcloud` and `/watch/Code` — the
+container-side names for the paths set in step 1.
 
-By default, `CORS_ORIGINS` is empty. Set it only when you need browser access from a
-different origin:
+You only need to edit this file to change which subdirectories are
+indexed or to add exclusions:
 
-    CORS_ORIGINS=https://chat.example.com,https://app.example.com
+    watch_paths:
+      - path: /watch/Code
+        recursive: true
+        exclude_dirs:
+          - .git
+          - .venv
+          - node_modules
 
-If the API runs behind a reverse proxy, set `TRUSTED_PROXY_IPS` to the proxy's IP so
-that `X-Forwarded-For` is used for rate-limiting instead of the proxy address:
+## 3. Pull Ollama models
 
-    TRUSTED_PROXY_IPS=192.168.1.1
-
-## 2. Pull Ollama models
-
-The embedding model is required. Pull it before starting the stack:
+The embedding model is required:
 
     ollama pull nomic-embed-text
 
-Then pull whichever generation model(s) you want to use for chat and Q&A:
+Pull whichever generation model(s) you want to use:
 
-    ollama pull qwen2.5:14b        # default GEN_MODEL
+    ollama pull qwen2.5:14b        # default
     ollama pull llama3.1:8b
     ollama pull qwen2.5-coder:14b
 
-Any model available in Ollama can be selected per-request; see the [Models](#models) section.
+Any model available in Ollama can be selected per-request.
 
-## 3. Start the stack
+## 4. Start the stack
 
     docker compose up -d
 
-This builds one shared `rag-system:latest` image, then starts three containers:
-`rag-qdrant`, `rag-api`, and `rag-watcher`. The API and watcher containers run
-the same image with different commands.
+Builds one shared `rag-system:latest` image and starts three containers:
+`rag-qdrant`, `rag-api`, and `rag-watcher`.
 
-## 4. Verify
+## 5. Add a web UI user
+
+    docker exec -it rag-api python manage_users.py add <username>
+
+Prompts for a password and stores a bcrypt hash in `data/users.sqlite3`.
+
+## 6. Verify
 
     docker compose ps
 
@@ -258,6 +251,8 @@ All three services should show status `running`.
     curl http://localhost:8000/healthz
 
 Expected: `{"status":"ok"}`
+
+Open `http://localhost:8000/ui/` and log in with the credentials from step 5.
 
 ## Logs
 
@@ -471,20 +466,13 @@ are served from `web/static/` only, so backend Python modules are not exposed
 under `/ui/`. Markdown rendering uses vendored copies of `marked.js` and
 `DOMPurify` — no internet access required at runtime.
 
-## Setup
-
-**1. Add users** via the management CLI:
+## Managing users
 
     docker exec -it rag-api python manage_users.py add <username>
-    # prompts for password, bcrypt-hashes it, writes to data/users.sqlite3
-
-Other commands:
-
     docker exec -it rag-api python manage_users.py list
     docker exec -it rag-api python manage_users.py remove <username>
 
-User changes take effect immediately — no container restart needed.
-Removing a user invalidates their active session on the next request.
+Changes take effect immediately. Removing a user invalidates their active session on the next request.
 
 ## Accessing the UI
 
