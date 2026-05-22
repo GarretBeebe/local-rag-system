@@ -72,13 +72,15 @@ def build_prompt(
         instructions = (
             "Use the context below to inform your answer where relevant. "
             "You may supplement with your own knowledge where the context is incomplete. "
-            "Cite sources as [S1], [S2] where context was used. Be concise."
+            "Cite sources as [S1], [S2] where context was used. "
+            "Do not add a References or Sources section. Be concise."
         )
     else:
         instructions = (
             "Use ONLY the context below to answer. "
             "If the context is insufficient, say what is missing. "
             "Cite sources like [S1], [S2] in the answer. "
+            "Do not add a References or Sources section. "
             "Do not invent details not present in the context. Be concise."
         )
 
@@ -97,8 +99,7 @@ def _format_sources(chunks: list[Chunk]) -> str:
     for i, chunk in enumerate(chunks, start=1):
         p = chunk.payload
         path = _resolve_source(p)
-        score = chunk.rerank_score or 0.0
-        lines.append(f"[S{i}] {path} (rerank={score:.4f})")
+        lines.append(f"[S{i}] {path}")
     joined = "\n".join(lines)
     return f"\n\n---\n\nSources:\n\n{joined}\n"
 
