@@ -30,6 +30,31 @@ watch_paths:
 
   - path: "/watch/Code"
     recursive: true
+    exclude_dirs:
+      - ".git"
+      - ".venv"
+      - "venv"
+      - "__pycache__"
+      - "node_modules"
+      - ".npm"
+      - ".yarn"
+      - ".pytest_cache"
+      - ".mypy_cache"
+      - ".ruff_cache"
+      - ".tox"
+      - ".cache"
+      - "build"
+      - "dist"
+      - "target"
+      - "out"
+      - ".next"
+      - ".codex"
+      - "rag_system.egg-info"
+      - "wandb"
+      - "mlruns"
+      - "checkpoints"
+      - ".idea"
+      - ".vscode"
 
 
 allowed_extensions:

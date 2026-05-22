@@ -124,3 +124,52 @@ def test_index_file_exception_is_logged_and_returns_failed(
 
     assert result == IndexDecision.FAILED
     assert "index exploded" in caplog.text
+
+
+# --- _iter_schedulable_dirs ---
+
+def test_iter_schedulable_dirs_no_exclusions_yields_all(tmp_path: Path) -> None:
+    """With no exclude_dirs, all directories including nested ones are yielded."""
+    (tmp_path / "a" / "b").mkdir(parents=True)
+
+    from indexer.watcher import _iter_schedulable_dirs
+
+    result = set(_iter_schedulable_dirs(tmp_path, []))
+    assert result == {tmp_path, tmp_path / "a", tmp_path / "a" / "b"}
+
+
+def test_iter_schedulable_dirs_excluded_dir_and_children_are_pruned(tmp_path: Path) -> None:
+    """An excluded directory and all its descendants are absent from results."""
+    (tmp_path / ".venv" / "lib").mkdir(parents=True)
+
+    from indexer.watcher import _iter_schedulable_dirs
+
+    result = set(_iter_schedulable_dirs(tmp_path, [".venv"]))
+    assert tmp_path in result
+    assert tmp_path / ".venv" not in result
+    assert tmp_path / ".venv" / "lib" not in result
+
+
+def test_iter_schedulable_dirs_non_excluded_sibling_is_kept(tmp_path: Path) -> None:
+    """A sibling of an excluded directory is still yielded."""
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / "src").mkdir()
+
+    from indexer.watcher import _iter_schedulable_dirs
+
+    result = set(_iter_schedulable_dirs(tmp_path, [".venv"]))
+    assert tmp_path / "src" in result
+    assert tmp_path / ".venv" not in result
+
+
+def test_iter_schedulable_dirs_nested_exclusion_stops_recursion(tmp_path: Path) -> None:
+    """Exclusion at a nested level stops traversal into that subtree only."""
+    (tmp_path / "a" / "__pycache__" / "x").mkdir(parents=True)
+
+    from indexer.watcher import _iter_schedulable_dirs
+
+    result = set(_iter_schedulable_dirs(tmp_path, ["__pycache__"]))
+    assert tmp_path in result
+    assert tmp_path / "a" in result
+    assert tmp_path / "a" / "__pycache__" not in result
+    assert tmp_path / "a" / "__pycache__" / "x" not in result

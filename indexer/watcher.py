@@ -28,7 +28,7 @@ from watchdog.observers.polling import PollingObserver
 from common.config import load_yaml_config
 from common.index_state import bump_index_version
 from common.index_state import init_db as init_index_state
-from common.paths import is_indexable_path, normalize_extensions, normalize_path
+from common.paths import is_indexable_path, matches_ignore_pattern, normalize_extensions, normalize_path
 from common.types import IndexDecision
 from indexer.fingerprint_store import get_hash, init_db, upsert_hash
 from ingest.cleanup_stale import cleanup_stale
@@ -175,6 +175,14 @@ def _iter_watch_paths(watch_paths: list[dict[str, Any]]) -> Generator[tuple[dict
         yield entry, Path(normalize_path(raw_path))
 
 
+def _iter_schedulable_dirs(root: Path, exclude_dirs: list[str]) -> Generator[Path, None, None]:
+    """Yield root and all non-excluded subdirectories for non-recursive scheduling."""
+    yield root
+    for child in sorted(root.iterdir()):
+        if child.is_dir() and not matches_ignore_pattern(child, exclude_dirs):
+            yield from _iter_schedulable_dirs(child, exclude_dirs)
+
+
 def validate_required_mounts(required_mounts: list[dict[str, Any]]) -> list[Path]:
     """Validate bind mount roots at startup. Exits with code 1 if any are missing or empty."""
     if not required_mounts:
@@ -228,8 +236,15 @@ def main() -> None:
 
     observer = PollingObserver(timeout=WATCHER_POLL_INTERVAL_SECONDS)
     for entry, path in watch_path_pairs:
-        logger.info("Watching %s", path)
-        observer.schedule(handler, str(path), recursive=entry.get("recursive", True))
+        exclude_dirs = entry.get("exclude_dirs", [])
+        if exclude_dirs and entry.get("recursive", True):
+            scheduled_dirs = list(_iter_schedulable_dirs(path, exclude_dirs))
+            for watch_dir in scheduled_dirs:
+                observer.schedule(handler, str(watch_dir), recursive=False)
+            logger.info("Watching %s (%d directories scheduled)", path, len(scheduled_dirs))
+        else:
+            observer.schedule(handler, str(path), recursive=entry.get("recursive", True))
+            logger.info("Watching %s", path)
 
     observer.start()
 

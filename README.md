@@ -402,6 +402,13 @@ Example container config:
         recursive: true
       - path: /watch/Code
         recursive: true
+        exclude_dirs:
+          - .git
+          - .venv
+          - __pycache__
+          - node_modules
+          - build
+          - dist
 
     allowed_extensions:
       - .md
@@ -423,6 +430,15 @@ Example container config:
       - .ssh
       - "*.pem"
       - "*secret*"
+
+**`exclude_dirs` vs `ignore_patterns`:** `ignore_patterns` filters which files get
+*indexed* — it does not stop `PollingObserver` from walking those directories on
+every poll tick. If a watch path contains large non-code trees (`.venv`, `.git`,
+`node_modules`, build artifacts), the observer will still stat every file inside
+them, causing sustained CPU load proportional to the total file count. Use
+`exclude_dirs` on those watch path entries to prune the polling walk itself.
+`ignore_patterns` remains useful for file-level filtering (e.g. `*.pem`,
+`*secret*`) where directory pruning is not enough.
 
 ------------------------------------------------------------------------
 
