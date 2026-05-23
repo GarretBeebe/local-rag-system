@@ -16,6 +16,7 @@ import math
 import re
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from qdrant_client.models import FieldCondition, Filter, MatchValue
@@ -25,6 +26,7 @@ from api.embed import embed
 from api.keyword_index import KeywordIndex
 from api.timing import timed as _timed
 from settings import (
+    ALLOWED_EXTENSIONS,
     COLLECTION,
     FINAL_K,
     MMR_ENABLED,
@@ -57,6 +59,8 @@ _reranker_model_name = RERANK_MODEL
 _keyword_index: KeywordIndex | None = None
 
 _FILENAME_RE = re.compile(r"\b([\w.-]+\.[a-zA-Z]{2,5})\b")
+_FILENAME_FUZZY_N = 1
+_FILENAME_FUZZY_CUTOFF = 0.75
 
 
 def startup(rerank_model: str = RERANK_MODEL) -> None:
@@ -67,6 +71,14 @@ def startup(rerank_model: str = RERANK_MODEL) -> None:
     _reranker_model_name = rerank_model
     _keyword_index = KeywordIndex()
     _keyword_index.start()
+
+
+def shutdown() -> None:
+    """Stop retrieval support services. Call from FastAPI lifespan cleanup."""
+    global _keyword_index
+    if _keyword_index is not None:
+        _keyword_index.stop()
+        _keyword_index = None
 
 
 def _get_reranker() -> CrossEncoder:
@@ -91,10 +103,14 @@ def _extract_filename(question: str) -> str | None:
     if not match:
         return None
     candidate = match.group(1)
+    if Path(candidate).suffix.lower() not in ALLOWED_EXTENSIONS:
+        return None
     known = _get_keyword_index().known_filenames
     if candidate in known:
         return candidate
-    close = difflib.get_close_matches(candidate, known, n=1, cutoff=0.75)
+    close = difflib.get_close_matches(
+        candidate, known, n=_FILENAME_FUZZY_N, cutoff=_FILENAME_FUZZY_CUTOFF
+    )
     return close[0] if close else None
 
 

@@ -52,7 +52,9 @@ def test_stream_generate_raises_on_ollama_error_payload(monkeypatch):
     response.__enter__.return_value = response
     response.__exit__.return_value = None
 
-    monkeypatch.setattr("api.ollama_client._session.post", lambda *a, **kw: response)
+    mock_session = MagicMock()
+    mock_session.post.return_value = response
+    monkeypatch.setattr("api.ollama_client._get_session", lambda: mock_session)
 
     with pytest.raises(RuntimeError, match="model load failed"):
         list(ollama_client.stream_generate("test prompt", "test-model"))

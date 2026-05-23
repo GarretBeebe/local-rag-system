@@ -51,14 +51,11 @@ def load_config() -> dict[str, Any]:
     try:
         return load_yaml_config(CONFIG_PATH)
     except FileNotFoundError:
-        logger.error("Config file not found: %s", CONFIG_PATH)
-        sys.exit(1)
+        raise RuntimeError(f"Config file not found: {CONFIG_PATH}") from None
     except ValueError as e:
-        logger.error("%s", e)
-        sys.exit(1)
+        raise RuntimeError(str(e)) from e
     except Exception as e:
-        logger.error("Failed to parse config file %s: %s", CONFIG_PATH, e)
-        sys.exit(1)
+        raise RuntimeError(f"Failed to parse config file {CONFIG_PATH}: {e}") from e
 
 
 def sha256_file(path: Path) -> str:
@@ -86,7 +83,12 @@ def _index_if_changed(path: str) -> IndexDecision:
             bump_index_version()
             return IndexDecision.INDEXED
         if outcome == IndexDecision.SKIPPED:
-            logger.info("Skipped %s — fingerprint not updated", path)
+            if prev_hash is not None:
+                logger.info("Removing stale vectors for %s (now unindexable)", path)
+                remove_indexed_document(path)
+                bump_index_version()
+            else:
+                logger.info("Skipped %s (never indexed)", path)
             return IndexDecision.SKIPPED
         logger.warning("Failed to index %s — fingerprint not updated", path)
         return IndexDecision.FAILED
@@ -196,7 +198,7 @@ def _iter_schedulable_dirs(root: Path, exclude_dirs: list[str]) -> Generator[Pat
 
 
 def validate_required_mounts(required_mounts: list[dict[str, Any]]) -> list[Path]:
-    """Validate bind mount roots at startup. Exits with code 1 if any are missing or empty."""
+    """Validate bind mount roots at startup. Raises RuntimeError if any are missing or empty."""
     if not required_mounts:
         logger.warning("No required_mounts configured — skipping mount validation")
         return []
@@ -204,15 +206,13 @@ def validate_required_mounts(required_mounts: list[dict[str, Any]]) -> list[Path
     for entry in required_mounts:
         root = Path(normalize_path(entry["path"]))
         if not root.exists():
-            logger.error(
-                "Required mount %s does not exist — exiting so Docker can restart", root
+            raise RuntimeError(
+                f"Required mount {root} does not exist — restart will be attempted"
             )
-            sys.exit(1)
         if entry.get("require_non_empty", False) and not any(root.iterdir()):
-            logger.error(
-                "Required mount %s is empty — exiting so Docker can restart", root
+            raise RuntimeError(
+                f"Required mount {root} is empty — restart will be attempted"
             )
-            sys.exit(1)
         logger.info("Mount %s OK", root)
         roots.append(root)
     return roots
@@ -221,15 +221,27 @@ def validate_required_mounts(required_mounts: list[dict[str, Any]]) -> list[Path
 def initial_scan(watch_path_pairs: list[tuple[dict, Path]], handler: WatchHandler) -> None:
     logger.info("Starting initial scan")
     for entry, root in watch_path_pairs:
-        pattern = "**/*" if entry.get("recursive", True) else "*"
-        for f in root.glob(pattern):
-            if f.is_file():
-                handler.enqueue(str(f))
+        exclude_dirs = entry.get("exclude_dirs", [])
+        recursive = entry.get("recursive", True)
+        if recursive and exclude_dirs:
+            for directory in _iter_schedulable_dirs(root, exclude_dirs):
+                for f in directory.glob("*"):
+                    if f.is_file():
+                        handler.enqueue(str(f))
+        else:
+            pattern = "**/*" if recursive else "*"
+            for f in root.glob(pattern):
+                if f.is_file():
+                    handler.enqueue(str(f))
 
 
 def main() -> None:
-    config = load_config()
-    required_mount_roots = validate_required_mounts(config.get("required_mounts", []))
+    try:
+        config = load_config()
+        required_mount_roots = validate_required_mounts(config.get("required_mounts", []))
+    except RuntimeError as e:
+        logger.error("%s", e)
+        sys.exit(1)
 
     init_db()
     init_index_state()
@@ -249,13 +261,14 @@ def main() -> None:
     observer = PollingObserver(timeout=WATCHER_POLL_INTERVAL_SECONDS)
     for entry, path in watch_path_pairs:
         exclude_dirs = entry.get("exclude_dirs", [])
-        if exclude_dirs and entry.get("recursive", True):
+        recursive = entry.get("recursive", True)
+        if exclude_dirs and recursive:
             scheduled_dirs = list(_iter_schedulable_dirs(path, exclude_dirs))
             for watch_dir in scheduled_dirs:
                 observer.schedule(handler, str(watch_dir), recursive=False)
             logger.info("Watching %s (%d directories scheduled)", path, len(scheduled_dirs))
         else:
-            observer.schedule(handler, str(path), recursive=entry.get("recursive", True))
+            observer.schedule(handler, str(path), recursive=recursive)
             logger.info("Watching %s", path)
 
     observer.start()

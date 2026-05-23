@@ -140,6 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for t in sweep_tasks:
             with suppress(asyncio.CancelledError):
                 await t
+        api.retrieval.shutdown()
         _get_rag_executor().shutdown(wait=False)
 
 
@@ -232,7 +233,9 @@ async def _run_rag_with_timeout(
         future.add_done_callback(lambda _f: semaphore.release())
 
         try:
-            answer = await asyncio.wait_for(future, timeout=remaining)
+            # shield: timeout cancels the wrapper, not the executor future, so the
+            # done callback (semaphore release) fires only when ask() truly exits.
+            answer = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
         except TimeoutError:
             logger.warning("RAG pipeline timed out after %.1fs", timeout)
             raise HTTPException(

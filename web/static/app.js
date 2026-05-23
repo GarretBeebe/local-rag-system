@@ -105,21 +105,55 @@ const $ = id => document.getElementById(id);
 
     // -- Send ----------------------------------------------------------------
 
-    async function sendMessage() {
-      const text = inputEl.value.trim();
-      if (!text || sendBtn.disabled) return;
-
-      inputEl.value = '';
+    function _lockUi() {
       sendBtn.disabled = true;
       sendBtn.hidden = true;
       stopBtn.hidden = false;
       modelSelect.disabled = true;
       modeSelect.disabled = true;
+    }
+
+    function _unlockUi(wasStopped) {
+      _abortCtl = null;
+      sendBtn.disabled = false;
+      sendBtn.hidden = false;
+      stopBtn.hidden = true;
+      modelSelect.disabled = false;
+      modeSelect.disabled = false;
+      if (!wasStopped) inputEl.focus();
+    }
+
+    async function* _iterSSEDeltas(reader) {
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') continue;
+          let chunk;
+          try { chunk = JSON.parse(payload); } catch { continue; }
+          const delta = chunk?.choices?.[0]?.delta?.content;
+          if (delta) yield delta;
+        }
+      }
+    }
+
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text || sendBtn.disabled) return;
+
+      inputEl.value = '';
       _abortCtl = new AbortController();
+      _lockUi();
       let wasStopped = false;
 
       appendMessage('user', text);
-
       const thinking = document.createElement('div');
       thinking.className = 'thinking';
       thinking.textContent = 'Thinking…';
@@ -143,57 +177,33 @@ const $ = id => document.getElementById(id);
         });
 
         if (res.status === 401) {
-          thinking.remove();
           showLogin('Session expired. Please sign in again.');
           return;
         }
 
         if (!res.ok) {
-          thinking.remove();
           const body = await res.text().catch(() => '');
           appendMessage('error', `Server error ${res.status}${body ? ': ' + body : ''}`);
           return;
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop(); // keep incomplete last line in buffer
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const payload = line.slice(6).trim();
-            if (payload === '[DONE]') continue;
-            let chunk;
-            try { chunk = JSON.parse(payload); } catch { continue; }
-            const delta = chunk?.choices?.[0]?.delta?.content;
-            if (!delta) continue;
-
-            accumulated += delta;
-            if (!assistantDiv) {
-              thinking.remove();
-              assistantDiv = appendMessage('assistant', marked.parse(accumulated));
-            } else {
-              assistantDiv.innerHTML = DOMPurify.sanitize(marked.parse(accumulated));
-              messagesEl.scrollTop = messagesEl.scrollHeight;
-            }
+        for await (const delta of _iterSSEDeltas(res.body.getReader())) {
+          accumulated += delta;
+          if (!assistantDiv) {
+            thinking.remove();
+            assistantDiv = appendMessage('assistant', marked.parse(accumulated));
+          } else {
+            assistantDiv.innerHTML = DOMPurify.sanitize(marked.parse(accumulated));
+            messagesEl.scrollTop = messagesEl.scrollHeight;
           }
         }
 
         if (!assistantDiv) {
-          thinking.remove();
           appendMessage('error', 'No response received.');
         }
       } catch (err) {
         if (err.name === 'AbortError') {
           wasStopped = true;
-          thinking.remove();
           if (assistantDiv) {
             const suffix = document.createElement('span');
             suffix.className = 'stopped-suffix';
@@ -203,17 +213,11 @@ const $ = id => document.getElementById(id);
             appendMessage('error', '[stopped]');
           }
         } else {
-          thinking.remove();
           appendMessage('error', `Request failed: ${err.message}`);
         }
       } finally {
-        _abortCtl = null;
-        sendBtn.disabled = false;
-        sendBtn.hidden = false;
-        stopBtn.hidden = true;
-        modelSelect.disabled = false;
-        modeSelect.disabled = false;
-        if (!wasStopped) inputEl.focus();
+        if (thinking.isConnected) thinking.remove();
+        _unlockUi(wasStopped);
       }
     }
 

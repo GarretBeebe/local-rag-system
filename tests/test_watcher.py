@@ -74,13 +74,17 @@ def test_indexed_outcome_updates_fingerprint(changed_hashes: Path, monkeypatch) 
     assert bumps == [True]
 
 
-def test_skipped_outcome_does_not_update_fingerprint(changed_hashes: Path, monkeypatch) -> None:
-    """'skipped' outcome does not call upsert_hash and returns SKIPPED."""
+def test_skipped_outcome_removes_stale_vectors_when_previously_indexed(
+    changed_hashes: Path, monkeypatch
+) -> None:
+    """Previously indexed file returning SKIPPED deletes stale vectors; fingerprint unchanged."""
     monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.SKIPPED)
     upserted: list[tuple[str, str]] = []
-    bumps = []
+    bumps: list[bool] = []
+    removed: list[str] = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
     monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
+    monkeypatch.setattr("indexer.watcher.remove_indexed_document", lambda p: removed.append(p))
 
     from indexer.watcher import _index_if_changed
 
@@ -88,7 +92,28 @@ def test_skipped_outcome_does_not_update_fingerprint(changed_hashes: Path, monke
 
     assert result == IndexDecision.SKIPPED
     assert upserted == []
-    assert bumps == []
+    assert removed == [str(changed_hashes)]
+    assert bumps == [True]
+
+
+def test_skipped_outcome_never_indexed_does_not_remove_document(
+    existing_file: Path, monkeypatch
+) -> None:
+    """File returning SKIPPED with no prior fingerprint does not call remove_indexed_document."""
+    monkeypatch.setattr("indexer.watcher.sha256_file", lambda p: "some_hash")
+    monkeypatch.setattr("indexer.watcher.get_hash", lambda p: None)  # never indexed
+    monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.SKIPPED)
+    removed: list[str] = []
+    monkeypatch.setattr("indexer.watcher.remove_indexed_document", lambda p: removed.append(p))
+    monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: None)
+    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: None)
+
+    from indexer.watcher import _index_if_changed
+
+    result = _index_if_changed(str(existing_file))
+
+    assert result == IndexDecision.SKIPPED
+    assert removed == []
 
 
 def test_failed_outcome_does_not_update_fingerprint(changed_hashes: Path, monkeypatch) -> None:

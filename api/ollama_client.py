@@ -1,4 +1,4 @@
-"""Shared HTTP session for all Ollama API calls."""
+"""Per-thread Ollama HTTP sessions — each worker thread gets its own requests.Session."""
 
 import json
 import logging
@@ -14,17 +14,23 @@ from settings import OLLAMA_BASE_URL, OLLAMA_GENERATE_TIMEOUT_SECONDS, OLLAMA_NU
 
 logger = logging.getLogger(__name__)
 
-_session = requests.Session()
+_thread_local = threading.local()
 _MAX_RETRIES = 2
 _RETRY_DELAY = 1.0
 
 
+def _get_session() -> requests.Session:
+    if not hasattr(_thread_local, "session"):
+        _thread_local.session = requests.Session()
+    return _thread_local.session
+
+
 def post(path: str, **kwargs: Any) -> requests.Response:
-    return _session.post(f"{OLLAMA_BASE_URL}{path}", **kwargs)
+    return _get_session().post(f"{OLLAMA_BASE_URL}{path}", **kwargs)
 
 
 def get(path: str, **kwargs: Any) -> requests.Response:
-    return _session.get(f"{OLLAMA_BASE_URL}{path}", **kwargs)
+    return _get_session().get(f"{OLLAMA_BASE_URL}{path}", **kwargs)
 
 
 def post_with_retry(path: str, **kwargs: Any) -> requests.Response:
@@ -33,7 +39,7 @@ def post_with_retry(path: str, **kwargs: Any) -> requests.Response:
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            r = _session.post(url, **kwargs)
+            r = _get_session().post(url, **kwargs)
             if r.status_code >= 500 and attempt < _MAX_RETRIES:
                 logger.warning(
                     "Ollama returned HTTP %d for %s (attempt %d/%d), retrying",
@@ -81,7 +87,7 @@ def stream_generate(
     cancel: threading.Event | None = None,
 ) -> Iterator[str]:
     """Yield text chunks from Ollama's streaming generation API."""
-    with _session.post(
+    with _get_session().post(
         f"{OLLAMA_BASE_URL}/api/generate",
         json=_generate_payload(model, prompt, stream=True),
         stream=True,

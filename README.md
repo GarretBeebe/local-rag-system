@@ -91,7 +91,7 @@ The ingestion pipeline supports:
     rag-system/
     ├── api/
     │   ├── embed.py             ← shared embedding helper (ingest + retrieval)
-    │   ├── ollama_client.py     ← shared Ollama HTTP session
+    │   ├── ollama_client.py     ← per-thread Ollama HTTP sessions
     │   ├── query_rag.py
     │   ├── retrieval.py
     │   └── keyword_index.py
@@ -331,6 +331,7 @@ the relevant container (`api` or `watcher`).
 | `FINAL_K` | `4` | Number of chunks passed to the LLM after reranking |
 | `MMR_LAMBDA_MULT` | `0.7` | MMR trade-off: 1.0 = pure relevance, 0.0 = pure diversity |
 | `KEYWORD_REFRESH_INTERVAL` | `30` | Seconds between cheap checks for watcher-indexed changes; BM25 rebuilds only when indexed content changed |
+| `MAX_CHUNK_CHARS` | `2000` | Maximum characters per chunk for all chunkers (text, Python, Markdown) |
 
 Enable timing to identify which pipeline stage dominates latency:
 
@@ -539,7 +540,7 @@ Implemented latency improvements:
 | Change | Effect |
 | --- | --- |
 | True Ollama streaming | First token delivered as generation starts, not after full completion |
-| Shared HTTP session | TCP connections to Ollama reused across embed and generate calls |
+| Per-thread HTTP sessions | One `requests.Session` per RAG worker thread — TCP connections to Ollama reused without contention |
 | BM25 `heapq.nlargest` | Partial top-k sort replaces full O(n log n) sort on every query |
 | Zero-score BM25 filter | Irrelevant keyword results excluded before reranking |
 | Candidate deduplication | Vector and keyword overlap removed before cross-encoder |

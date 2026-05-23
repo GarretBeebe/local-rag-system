@@ -35,17 +35,32 @@ class KeywordIndex:
         self._bm25: BM25Okapi | None = None
         self.known_filenames: set[str] = set()
         self._last_seen_version: int | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         """Build the initial index and start the background refresh thread.
 
         Call this from the application lifespan, not at import time.
+        Guards against repeated calls so lifespan restarts don't leak threads.
         """
+        if self._thread is not None and self._thread.is_alive():
+            return
         init_index_state()
         self._build()
         self._last_seen_version = get_index_version()
-        t = threading.Thread(target=self._refresh_loop, args=(self._refresh_interval,), daemon=True)
-        t.start()
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._refresh_loop, args=(self._refresh_interval,), daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Signal the refresh thread to exit and wait for it to finish."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
 
     def _build(self) -> None:
         t0 = time.monotonic()
@@ -77,8 +92,7 @@ class KeywordIndex:
         logger.info("KeywordIndex built: %d docs in %.2fs", len(docs), elapsed)
 
     def _refresh_loop(self, interval: int) -> None:
-        while True:
-            time.sleep(interval)
+        while not self._stop.wait(timeout=interval):
             self._refresh_if_changed()
 
     def _refresh_if_changed(self) -> bool:
