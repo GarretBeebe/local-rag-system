@@ -68,8 +68,18 @@ class KeywordIndex:
         t0 = time.monotonic()
         docs, payloads, ids, filenames = [], [], [], set()
         offset = None
+        client = get_qdrant_client()
+        try:
+            if not client.collection_exists(COLLECTION):
+                self._replace_index(docs, payloads, ids, filenames)
+                logger.info("KeywordIndex built: collection %s does not exist yet", COLLECTION)
+                return
+        except Exception as e:
+            self._replace_index(docs, payloads, ids, filenames)
+            logger.warning("KeywordIndex collection check failed: %s", e, exc_info=True)
+            return
         while True:
-            points, next_offset = get_qdrant_client().scroll(
+            points, next_offset = client.scroll(
                 collection_name=COLLECTION,
                 limit=_SCROLL_PAGE_SIZE,
                 offset=offset,
@@ -88,10 +98,20 @@ class KeywordIndex:
             offset = next_offset
         bm25 = BM25Okapi(docs) if docs else None
         elapsed = time.monotonic() - t0
+        self._replace_index(docs, payloads, ids, filenames, bm25)
+        logger.info("KeywordIndex built: %d docs in %.2fs", len(docs), elapsed)
+
+    def _replace_index(
+        self,
+        docs: list[list[str]],
+        payloads: list[dict[str, Any]],
+        ids: list[str | int],
+        filenames: set[str],
+        bm25: BM25Okapi | None = None,
+    ) -> None:
         with self._lock:
             self._docs, self._payloads, self._ids, self._bm25 = docs, payloads, ids, bm25
             self.known_filenames = filenames
-        logger.info("KeywordIndex built: %d docs in %.2fs", len(docs), elapsed)
 
     def _refresh_loop(self, interval: int) -> None:
         while not self._stop.wait(timeout=interval):

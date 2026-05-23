@@ -14,7 +14,7 @@ to batch embed all chunks per file in one request.
 import logging
 
 import api.ollama_client as ollama_client
-from settings import EMBED_MODEL, MAX_EMBED_CHARS, OLLAMA_EMBED_TIMEOUT_SECONDS
+from settings import EMBED_MODEL, MAX_EMBED_CHARS, OLLAMA_EMBED_TIMEOUT_SECONDS, VECTOR_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -46,4 +46,10 @@ def embed(text: str) -> list[float]:
     if "embedding" not in data:
         raise RuntimeError("Embedding response missing 'embedding' field")
 
-    return data["embedding"]
+    vector = data["embedding"]
+    if len(vector) != VECTOR_SIZE:
+        raise RuntimeError(
+            f"Embedding model {EMBED_MODEL!r} returned {len(vector)} dimensions; "
+            f"configured VECTOR_SIZE is {VECTOR_SIZE}"
+        )
+    return vector

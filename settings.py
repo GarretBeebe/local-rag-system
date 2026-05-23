@@ -24,8 +24,8 @@ DOCS_PATH = PROJECT_ROOT / "documents"
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
-COLLECTION = "documents"
-VECTOR_SIZE = 768
+COLLECTION = os.environ.get("QDRANT_COLLECTION", "documents")
+VECTOR_SIZE = int(os.environ.get("VECTOR_SIZE", "768"))
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # "strict"    — answer only from retrieved context; refuse if nothing found
@@ -87,6 +87,81 @@ MAX_CHAT_MESSAGE_CHARS = int(os.environ.get("MAX_CHAT_MESSAGE_CHARS", "8000"))
 MAX_CHAT_TOTAL_CHARS = int(os.environ.get("MAX_CHAT_TOTAL_CHARS", "120000"))
 MAX_CHAT_QUESTION_CHARS = int(os.environ.get("MAX_CHAT_QUESTION_CHARS", "12000"))
 MAX_MODEL_NAME_CHARS = int(os.environ.get("MAX_MODEL_NAME_CHARS", "128"))
+
+
+def _require_positive_int(name: str, value: int) -> None:
+    if value <= 0:
+        raise ValueError(f"settings: {name} must be > 0, got {value}")
+
+
+def _require_positive_float(name: str, value: float) -> None:
+    if value <= 0:
+        raise ValueError(f"settings: {name} must be > 0, got {value}")
+
+
+def _validate_settings() -> None:
+    for name, value in {
+        "QDRANT_PORT": QDRANT_PORT,
+        "VECTOR_SIZE": VECTOR_SIZE,
+        "SESSION_EXPIRY_HOURS": SESSION_EXPIRY_HOURS,
+        "RAG_EXECUTOR_WORKERS": RAG_EXECUTOR_WORKERS,
+        "RAG_CONCURRENCY_LIMIT": RAG_CONCURRENCY_LIMIT,
+        "RATE_MAX_REQUESTS": RATE_MAX_REQUESTS,
+        "RATE_MAX_LOGIN_REQUESTS": RATE_MAX_LOGIN_REQUESTS,
+        "OLLAMA_NUM_CTX": OLLAMA_NUM_CTX,
+        "RECALL_K": RECALL_K,
+        "MMR_K": MMR_K,
+        "FINAL_K": FINAL_K,
+        "KEYWORD_REFRESH_INTERVAL": KEYWORD_REFRESH_INTERVAL,
+        "MAX_CHUNK_CHARS": MAX_CHUNK_CHARS,
+        "CHUNK_SIZE": CHUNK_SIZE,
+        "MAX_CHAT_MESSAGES": MAX_CHAT_MESSAGES,
+        "MAX_CHAT_CONTENT_ITEMS": MAX_CHAT_CONTENT_ITEMS,
+        "MAX_CHAT_MESSAGE_CHARS": MAX_CHAT_MESSAGE_CHARS,
+        "MAX_CHAT_TOTAL_CHARS": MAX_CHAT_TOTAL_CHARS,
+        "MAX_CHAT_QUESTION_CHARS": MAX_CHAT_QUESTION_CHARS,
+        "MAX_MODEL_NAME_CHARS": MAX_MODEL_NAME_CHARS,
+    }.items():
+        _require_positive_int(name, value)
+    for name, value in {
+        "RATE_WINDOW_SECONDS": RATE_WINDOW_SECONDS,
+        "STREAM_TIMEOUT_SECONDS": STREAM_TIMEOUT_SECONDS,
+        "RAG_REQUEST_TIMEOUT_SECONDS": RAG_REQUEST_TIMEOUT_SECONDS,
+        "OLLAMA_GENERATE_TIMEOUT_SECONDS": OLLAMA_GENERATE_TIMEOUT_SECONDS,
+        "OLLAMA_EMBED_TIMEOUT_SECONDS": OLLAMA_EMBED_TIMEOUT_SECONDS,
+        "OLLAMA_MODEL_LIST_TIMEOUT_SECONDS": OLLAMA_MODEL_LIST_TIMEOUT_SECONDS,
+        "OLLAMA_WARMUP_TIMEOUT_SECONDS": OLLAMA_WARMUP_TIMEOUT_SECONDS,
+        "WATCHER_POLL_INTERVAL_SECONDS": WATCHER_POLL_INTERVAL_SECONDS,
+    }.items():
+        _require_positive_float(name, value)
+    if CHUNK_OVERLAP < 0:
+        raise ValueError(f"settings: CHUNK_OVERLAP must be >= 0, got {CHUNK_OVERLAP}")
+    if CHUNK_OVERLAP >= CHUNK_SIZE:
+        raise ValueError(
+            f"settings: CHUNK_OVERLAP must be smaller than CHUNK_SIZE, "
+            f"got {CHUNK_OVERLAP} >= {CHUNK_SIZE}"
+        )
+    if MAX_CHUNK_CHARS < CHUNK_SIZE:
+        raise ValueError(
+            f"settings: MAX_CHUNK_CHARS must be >= CHUNK_SIZE, "
+            f"got {MAX_CHUNK_CHARS} < {CHUNK_SIZE}"
+        )
+    if not 0.0 <= MMR_LAMBDA_MULT <= 1.0:
+        raise ValueError(
+            f"settings: MMR_LAMBDA_MULT must be between 0.0 and 1.0, got {MMR_LAMBDA_MULT}"
+        )
+    if FINAL_K > MMR_K:
+        raise ValueError(f"settings: FINAL_K must be <= MMR_K, got {FINAL_K} > {MMR_K}")
+    if MMR_K > RECALL_K:
+        raise ValueError(f"settings: MMR_K must be <= RECALL_K, got {MMR_K} > {RECALL_K}")
+    if MAX_CHAT_QUESTION_CHARS > MAX_CHAT_TOTAL_CHARS:
+        raise ValueError(
+            "settings: MAX_CHAT_QUESTION_CHARS must be <= MAX_CHAT_TOTAL_CHARS, "
+            f"got {MAX_CHAT_QUESTION_CHARS} > {MAX_CHAT_TOTAL_CHARS}"
+        )
+
+
+_validate_settings()
 
 _qdrant_client: QdrantClient | None = None
 

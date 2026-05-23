@@ -211,47 +211,54 @@ async def _run_rag_with_timeout(
     timeout: float = RAG_REQUEST_TIMEOUT_SECONDS,
 ) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work."""
-    semaphore = _get_rag_concurrency()
-    loop = asyncio.get_running_loop()
     started = time.monotonic()
+    semaphore = await _acquire_rag_capacity(timeout)
+    remaining = timeout - (time.monotonic() - started)
+    if remaining <= 0:
+        semaphore.release()
+        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
+    future = _submit_rag_job(
+        asyncio.get_running_loop(), semaphore, ask, question, model, rag_mode
+    )
+    try:
+        # shield: timeout cancels the wrapper, not the executor future, so the
+        # done callback releases capacity only when ask() truly exits.
+        answer = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
+        return str(answer or "").strip()
+    except TimeoutError:
+        logger.warning("RAG pipeline timed out after %.1fs", timeout)
+        raise HTTPException(
+            status_code=504,
+            detail="RAG pipeline timed out while generating an answer.",
+        ) from None
+    except Exception as e:
+        logger.exception("RAG pipeline error")
+        raise HTTPException(status_code=500, detail="RAG pipeline error") from e
+
+
+async def _acquire_rag_capacity(timeout: float) -> asyncio.Semaphore:
+    semaphore = _get_rag_concurrency()
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=timeout)
     except TimeoutError:
         logger.warning("RAG pipeline timed out waiting for capacity after %.1fs", timeout)
-        raise HTTPException(
-            status_code=504,
-            detail=_RAG_CAPACITY_TIMEOUT_DETAIL,
-        ) from None
-    future = None
+        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
+    return semaphore
+
+
+def _submit_rag_job(
+    loop: asyncio.AbstractEventLoop,
+    semaphore: asyncio.Semaphore,
+    fn: Callable[..., str],
+    *args: Any,
+) -> asyncio.Future[str]:
     try:
-        remaining = timeout - (time.monotonic() - started)
-        if remaining <= 0:
-            raise HTTPException(
-                status_code=504,
-                detail=_RAG_CAPACITY_TIMEOUT_DETAIL,
-            ) from None
-        future = loop.run_in_executor(_get_rag_executor(), ask, question, model, rag_mode)
-        future.add_done_callback(lambda _f: semaphore.release())
-
-        try:
-            # shield: timeout cancels the wrapper, not the executor future, so the
-            # done callback (semaphore release) fires only when ask() truly exits.
-            answer = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
-        except TimeoutError:
-            logger.warning("RAG pipeline timed out after %.1fs", timeout)
-            raise HTTPException(
-                status_code=504,
-                detail="RAG pipeline timed out while generating an answer.",
-            ) from None
-        except Exception as e:
-            logger.exception("RAG pipeline error")
-            raise HTTPException(status_code=500, detail="RAG pipeline error") from e
+        future = loop.run_in_executor(_get_rag_executor(), fn, *args)
     except BaseException:
-        if future is None:
-            semaphore.release()
+        semaphore.release()
         raise
-
-    return str(answer or "").strip()
+    future.add_done_callback(lambda _f: semaphore.release())
+    return future
 
 
 async def _start_stream_worker(

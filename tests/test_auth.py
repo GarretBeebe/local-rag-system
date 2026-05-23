@@ -67,6 +67,35 @@ def test_delete_session_is_safe_for_unknown_token(fresh_db):
     user_store.delete_session("nonexistent")  # must not raise
 
 
+def test_delete_user_revokes_existing_sessions(fresh_db):
+    user_store.upsert_user("alice", "hash")
+    token = user_store.create_session("alice", expiry_hours=8)
+
+    user_store.delete_user("alice")
+
+    assert user_store.validate_session(token) is None
+
+
+def test_password_update_revokes_existing_sessions(fresh_db):
+    user_store.upsert_user("alice", "old-hash")
+    token = user_store.create_session("alice", expiry_hours=8)
+
+    user_store.upsert_user("alice", "new-hash")
+
+    assert user_store.validate_session(token) is None
+
+
+def test_validate_session_rejects_session_for_missing_user(fresh_db):
+    conn = user_store._store.conn
+    with conn:
+        conn.execute(
+            "INSERT INTO sessions(token, username, expires_at) VALUES(?, ?, ?)",
+            ("orphan-token", "missing", time.time() + 3600),
+        )
+
+    assert user_store.validate_session("orphan-token") is None
+
+
 def test_purge_expired_sessions_removes_stale_rows(fresh_db):
     user_store.upsert_user("alice", "hash")
     conn = user_store._store.conn

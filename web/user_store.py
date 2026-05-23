@@ -57,12 +57,14 @@ def upsert_user(username: str, password_hash: str) -> None:
             """,
             (username, password_hash),
         )
+        conn.execute("DELETE FROM sessions WHERE username=?", (username,))
 
 
 def delete_user(username: str) -> None:
     conn = _store.conn
     with conn:
         conn.execute("DELETE FROM users WHERE username=?", (username,))
+        conn.execute("DELETE FROM sessions WHERE username=?", (username,))
 
 
 def list_users() -> list[str]:
@@ -88,7 +90,12 @@ def validate_session(token: str) -> str | None:
     conn = _store.conn
     with conn:
         row = conn.execute(
-            "SELECT username FROM sessions WHERE token=? AND expires_at > ?",
+            """
+            SELECT sessions.username
+            FROM sessions
+            INNER JOIN users ON users.username = sessions.username
+            WHERE sessions.token=? AND sessions.expires_at > ?
+            """,
             (token, time.time()),
         ).fetchone()
     return row[0] if row else None
