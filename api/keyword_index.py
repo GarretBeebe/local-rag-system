@@ -23,6 +23,8 @@ from settings import COLLECTION, KEYWORD_REFRESH_INTERVAL, get_qdrant_client
 
 logger = logging.getLogger(__name__)
 
+_SCROLL_PAGE_SIZE = 1000
+
 
 class KeywordIndex:
 
@@ -69,7 +71,7 @@ class KeywordIndex:
         while True:
             points, next_offset = get_qdrant_client().scroll(
                 collection_name=COLLECTION,
-                limit=1000,
+                limit=_SCROLL_PAGE_SIZE,
                 offset=offset,
                 with_payload=True,
             )

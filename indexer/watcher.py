@@ -157,8 +157,7 @@ class WatchHandler(FileSystemEventHandler):
             self.enqueue(event.src_path)
 
     def on_modified(self, event: FileSystemEvent) -> None:
-        if not event.is_directory:
-            self.enqueue(event.src_path)
+        self.on_created(event)
 
     def on_deleted(self, event: FileSystemEvent) -> None:
         if event.is_directory or not is_indexable_path(

@@ -69,6 +69,7 @@ _WEB_DIR = Path(__file__).parent
 _STATIC_DIR = _WEB_DIR / "static"
 _AUTH_COOKIE = "rag_token"
 _SECONDS_PER_HOUR = 3600
+_RAG_CAPACITY_TIMEOUT_DETAIL = "RAG pipeline timed out waiting for capacity."
 # Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
 # preventing timing-based username enumeration.
 _DUMMY_HASH: bytes = _bcrypt.hashpw(b"__sentinel__", _bcrypt.gensalt())
@@ -219,7 +220,7 @@ async def _run_rag_with_timeout(
         logger.warning("RAG pipeline timed out waiting for capacity after %.1fs", timeout)
         raise HTTPException(
             status_code=504,
-            detail="RAG pipeline timed out waiting for capacity.",
+            detail=_RAG_CAPACITY_TIMEOUT_DETAIL,
         ) from None
     future = None
     try:
@@ -227,7 +228,7 @@ async def _run_rag_with_timeout(
         if remaining <= 0:
             raise HTTPException(
                 status_code=504,
-                detail="RAG pipeline timed out waiting for capacity.",
+                detail=_RAG_CAPACITY_TIMEOUT_DETAIL,
             ) from None
         future = loop.run_in_executor(_get_rag_executor(), ask, question, model, rag_mode)
         future.add_done_callback(lambda _f: semaphore.release())

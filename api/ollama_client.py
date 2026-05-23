@@ -19,6 +19,10 @@ _MAX_RETRIES = 2
 _RETRY_DELAY = 1.0
 
 
+def _url(path: str) -> str:
+    return f"{OLLAMA_BASE_URL}{path}"
+
+
 def _get_session() -> requests.Session:
     if not hasattr(_thread_local, "session"):
         _thread_local.session = requests.Session()
@@ -26,16 +30,16 @@ def _get_session() -> requests.Session:
 
 
 def post(path: str, **kwargs: Any) -> requests.Response:
-    return _get_session().post(f"{OLLAMA_BASE_URL}{path}", **kwargs)
+    return _get_session().post(_url(path), **kwargs)
 
 
 def get(path: str, **kwargs: Any) -> requests.Response:
-    return _get_session().get(f"{OLLAMA_BASE_URL}{path}", **kwargs)
+    return _get_session().get(_url(path), **kwargs)
 
 
 def post_with_retry(path: str, **kwargs: Any) -> requests.Response:
     """POST with up to _MAX_RETRIES retries on 5xx responses."""
-    url = f"{OLLAMA_BASE_URL}{path}"
+    url = _url(path)
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
@@ -88,7 +92,7 @@ def stream_generate(
 ) -> Iterator[str]:
     """Yield text chunks from Ollama's streaming generation API."""
     with _get_session().post(
-        f"{OLLAMA_BASE_URL}/api/generate",
+        _url("/api/generate"),
         json=_generate_payload(model, prompt, stream=True),
         stream=True,
         timeout=timeout,

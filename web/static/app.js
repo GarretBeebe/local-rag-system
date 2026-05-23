@@ -134,7 +134,7 @@ const $ = id => document.getElementById(id);
         buf = lines.pop();
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6).trim();
+          const payload = line.slice('data: '.length).trim();
           if (payload === '[DONE]') continue;
           let chunk;
           try { chunk = JSON.parse(payload); } catch { continue; }
