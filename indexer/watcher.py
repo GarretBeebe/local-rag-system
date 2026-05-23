@@ -144,7 +144,7 @@ class WatchHandler(FileSystemEventHandler):
     def _broken_mount_for(self, file_path: Path) -> Path | None:
         """Return the required mount root that is empty (broken bind mount), or None."""
         for root in self.required_mount_roots:
-            if file_path.is_relative_to(root) and not any(root.iterdir()):
+            if file_path.is_relative_to(root) and _is_empty_dir(root):
                 return root
         return None
 
@@ -173,8 +173,11 @@ class WatchHandler(FileSystemEventHandler):
             )
             return
         normalized_path = normalize_path(event.src_path)
-        remove_indexed_document(normalized_path)
-        bump_index_version()
+        try:
+            remove_indexed_document(normalized_path)
+            bump_index_version()
+        except Exception as e:
+            logger.error("Failed to remove deleted file %s: %s", normalized_path, e)
 
 
 def _iter_watch_paths(
@@ -186,6 +189,14 @@ def _iter_watch_paths(
             logger.warning("Skipping missing path: %s", raw_path)
             continue
         yield entry, Path(normalize_path(raw_path))
+
+
+def _is_empty_dir(path: Path) -> bool:
+    """Return True if path is an empty directory, False if non-empty or unreadable."""
+    try:
+        return not any(path.iterdir())
+    except OSError:
+        return False
 
 
 def _iter_schedulable_dirs(root: Path, exclude_dirs: list[str]) -> Generator[Path, None, None]:

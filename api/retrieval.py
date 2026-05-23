@@ -126,7 +126,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 def qdrant_recall(
     question_vec: list[float],
-    limit: int = 15,
+    limit: int = RECALL_K,
     with_vectors: bool = True,
     query_filter: Filter | None = None,
 ) -> list[Chunk]:
@@ -154,7 +154,7 @@ def qdrant_recall(
 def mmr_select(
     question_vec: list[float],
     candidates: list[Chunk],
-    top_n: int = 8,
+    top_n: int = MMR_K,
     lambda_mult: float = MMR_LAMBDA_MULT,
 ) -> list[Chunk]:
     """Select a diverse subset of candidates using Maximal Marginal Relevance.
@@ -181,7 +181,7 @@ def mmr_select(
     return selected
 
 
-def rerank(question: str, candidates: list[Chunk], top_n: int = 4) -> list[Chunk]:
+def rerank(question: str, candidates: list[Chunk], top_n: int = FINAL_K) -> list[Chunk]:
     """Cross-encoder reranking: scores (question, chunk) pairs directly."""
     if not candidates:
         return []

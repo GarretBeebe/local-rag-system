@@ -10,13 +10,17 @@ from typing import Any
 import requests
 from requests import RequestException
 
-from settings import OLLAMA_BASE_URL, OLLAMA_GENERATE_TIMEOUT_SECONDS, OLLAMA_NUM_CTX
+from settings import (
+    OLLAMA_BASE_URL,
+    OLLAMA_GENERATE_TIMEOUT_SECONDS,
+    OLLAMA_MAX_RETRIES,
+    OLLAMA_NUM_CTX,
+    OLLAMA_RETRY_DELAY_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
 _thread_local = threading.local()
-_MAX_RETRIES = 2
-_RETRY_DELAY = 1.0
 
 
 def _url(path: str) -> str:
@@ -38,18 +42,18 @@ def get(path: str, **kwargs: Any) -> requests.Response:
 
 
 def post_with_retry(path: str, **kwargs: Any) -> requests.Response:
-    """POST with up to _MAX_RETRIES retries on 5xx responses."""
+    """POST with up to OLLAMA_MAX_RETRIES retries on 5xx responses."""
     url = _url(path)
     last_exc: Exception | None = None
-    for attempt in range(_MAX_RETRIES + 1):
+    for attempt in range(OLLAMA_MAX_RETRIES + 1):
         try:
             r = _get_session().post(url, **kwargs)
-            if r.status_code >= 500 and attempt < _MAX_RETRIES:
+            if r.status_code >= 500 and attempt < OLLAMA_MAX_RETRIES:
                 logger.warning(
                     "Ollama returned HTTP %d for %s (attempt %d/%d), retrying",
-                    r.status_code, path, attempt + 1, _MAX_RETRIES + 1,
+                    r.status_code, path, attempt + 1, OLLAMA_MAX_RETRIES + 1,
                 )
-                time.sleep(_RETRY_DELAY)
+                time.sleep(OLLAMA_RETRY_DELAY_SECONDS)
                 continue
             if not r.ok:
                 raise RuntimeError(
@@ -58,9 +62,9 @@ def post_with_retry(path: str, **kwargs: Any) -> requests.Response:
             return r
         except RequestException as e:
             last_exc = e
-            if attempt < _MAX_RETRIES:
+            if attempt < OLLAMA_MAX_RETRIES:
                 logger.warning("Ollama request to %s failed: %s (retrying)", path, e)
-                time.sleep(_RETRY_DELAY)
+                time.sleep(OLLAMA_RETRY_DELAY_SECONDS)
     raise RuntimeError(f"Ollama request to {path} failed after retries: {last_exc}")
 
 

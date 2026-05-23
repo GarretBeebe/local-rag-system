@@ -7,7 +7,7 @@ def _chunk(filename: str, chunk_index: int = 0) -> Chunk:
         id=f"{filename}:{chunk_index}",
         payload={
             "filename": filename,
-            "filepath": f"/private/path/{filename}",
+            "filepath": f"/watch/Code/docs/{filename}",
             "chunk_index": chunk_index,
             "chunk_total": 3,
             "text": "retrieved text",
@@ -17,13 +17,14 @@ def _chunk(filename: str, chunk_index: int = 0) -> Chunk:
     )
 
 
-def test_format_sources_lists_filenames_only():
+def test_format_sources_includes_parent_dir():
     sources = _format_sources([_chunk("alpha.md"), _chunk("beta.md", 1)])
 
-    assert sources == "\n\n---\n\nSources:\n\n[S1] alpha.md\n[S2] beta.md\n"
+    # Two path components so same-named files in different dirs are distinguishable.
+    assert sources == "\n\n---\n\nSources:\n\n[S1] docs/alpha.md\n[S2] docs/beta.md\n"
     assert "chunk" not in sources
     assert "rerank" not in sources
-    assert "/private/path" not in sources
+    assert "/watch/Code" not in sources
 
 
 def test_build_prompt_tells_model_not_to_add_source_sections():

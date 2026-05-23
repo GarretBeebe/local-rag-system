@@ -31,8 +31,6 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # "strict"    — answer only from retrieved context; refuse if nothing found
 # "augmented" — use context when found, fall back to model knowledge otherwise
 RAG_MODE = os.environ.get("RAG_MODE", "augmented")
-if RAG_MODE not in ("strict", "augmented"):
-    raise ValueError(f"settings: RAG_MODE must be 'strict' or 'augmented', got {RAG_MODE!r}")
 MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 API_KEY = os.environ.get("API_KEY", "")
@@ -68,6 +66,8 @@ OLLAMA_MODEL_LIST_TIMEOUT_SECONDS = float(
     os.environ.get("OLLAMA_MODEL_LIST_TIMEOUT_SECONDS", "5.0")
 )
 OLLAMA_WARMUP_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_WARMUP_TIMEOUT_SECONDS", "60.0"))
+OLLAMA_MAX_RETRIES = int(os.environ.get("OLLAMA_MAX_RETRIES", "2"))
+OLLAMA_RETRY_DELAY_SECONDS = float(os.environ.get("OLLAMA_RETRY_DELAY_SECONDS", "1.0"))
 WARM_MODELS_ON_STARTUP = os.environ.get("WARM_MODELS_ON_STARTUP", "").lower() in ("1", "true")
 WATCHER_POLL_INTERVAL_SECONDS = float(os.environ.get("WATCHER_POLL_INTERVAL_SECONDS", "30"))
 
@@ -78,7 +78,7 @@ FINAL_K = int(os.environ.get("FINAL_K", "4"))
 MMR_LAMBDA_MULT = float(os.environ.get("MMR_LAMBDA_MULT", "0.7"))
 KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "30"))
 MAX_CHUNK_CHARS = int(os.environ.get("MAX_CHUNK_CHARS", "2000"))
-MAX_MD_CHUNK = MAX_CHUNK_CHARS
+MAX_MD_CHUNK = MAX_CHUNK_CHARS  # intentionally aliased — both chunkers enforce the same limit
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 MAX_CHAT_MESSAGES = int(os.environ.get("MAX_CHAT_MESSAGES", "200"))
@@ -132,8 +132,11 @@ def _validate_settings() -> None:
         "OLLAMA_MODEL_LIST_TIMEOUT_SECONDS": OLLAMA_MODEL_LIST_TIMEOUT_SECONDS,
         "OLLAMA_WARMUP_TIMEOUT_SECONDS": OLLAMA_WARMUP_TIMEOUT_SECONDS,
         "WATCHER_POLL_INTERVAL_SECONDS": WATCHER_POLL_INTERVAL_SECONDS,
+        "OLLAMA_RETRY_DELAY_SECONDS": OLLAMA_RETRY_DELAY_SECONDS,
     }.items():
         _require_positive_float(name, value)
+    if OLLAMA_MAX_RETRIES < 0:
+        raise ValueError(f"settings: OLLAMA_MAX_RETRIES must be >= 0, got {OLLAMA_MAX_RETRIES}")
     if CHUNK_OVERLAP < 0:
         raise ValueError(f"settings: CHUNK_OVERLAP must be >= 0, got {CHUNK_OVERLAP}")
     if CHUNK_OVERLAP >= CHUNK_SIZE:
@@ -159,6 +162,8 @@ def _validate_settings() -> None:
             "settings: MAX_CHAT_QUESTION_CHARS must be <= MAX_CHAT_TOTAL_CHARS, "
             f"got {MAX_CHAT_QUESTION_CHARS} > {MAX_CHAT_TOTAL_CHARS}"
         )
+    if RAG_MODE not in ("strict", "augmented"):
+        raise ValueError(f"settings: RAG_MODE must be 'strict' or 'augmented', got {RAG_MODE!r}")
 
 
 _validate_settings()

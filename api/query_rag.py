@@ -50,7 +50,8 @@ class _PromptQuery:
 
 def _resolve_source(payload: dict[str, Any]) -> str:
     full = payload.get("filepath", payload.get("filename", "unknown"))
-    return Path(full).name
+    parts = Path(full).parts
+    return "/".join(parts[-2:]) if len(parts) >= 2 else full
 
 
 def build_prompt(

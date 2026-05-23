@@ -69,6 +69,7 @@ _WEB_DIR = Path(__file__).parent
 _STATIC_DIR = _WEB_DIR / "static"
 _AUTH_COOKIE = "rag_token"
 _SECONDS_PER_HOUR = 3600
+_DISCONNECT_POLL_SECONDS = 0.5
 _RAG_CAPACITY_TIMEOUT_DETAIL = "RAG pipeline timed out waiting for capacity."
 # Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
 # preventing timing-based username enumeration.
@@ -224,7 +225,7 @@ async def _run_rag_with_timeout(
         # shield: timeout cancels the wrapper, not the executor future, so the
         # done callback releases capacity only when ask() truly exits.
         answer = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
-        return str(answer or "").strip()
+        return answer.strip()
     except TimeoutError:
         logger.warning("RAG pipeline timed out after %.1fs", timeout)
         raise HTTPException(
@@ -249,12 +250,14 @@ async def _acquire_rag_capacity(timeout: float) -> asyncio.Semaphore:
 def _submit_rag_job(
     loop: asyncio.AbstractEventLoop,
     semaphore: asyncio.Semaphore,
-    fn: Callable[..., str],
+    fn: Callable[..., Any],
     *args: Any,
-) -> asyncio.Future[str]:
+) -> asyncio.Future[Any]:
     try:
         future = loop.run_in_executor(_get_rag_executor(), fn, *args)
     except BaseException:
+        # BaseException catches CancelledError (not a subclass of Exception) so the
+        # semaphore is always released even if the event loop is shutting down.
         semaphore.release()
         raise
     future.add_done_callback(lambda _f: semaphore.release())
@@ -266,7 +269,7 @@ async def _start_stream_worker(
     model: str,
     rag_mode: RagMode,
     loop: asyncio.AbstractEventLoop,
-) -> tuple[asyncio.Queue[str | Exception | None], threading.Event, Future[None]]:
+) -> tuple[asyncio.Queue[str | Exception | None], threading.Event, asyncio.Future[Any]]:
     """Acquire the semaphore, schedule the stream worker, and return (queue, cancel_event, future).
 
     Raises TimeoutError if the semaphore cannot be acquired within RAG_REQUEST_TIMEOUT_SECONDS.
@@ -285,22 +288,14 @@ async def _start_stream_worker(
 
     semaphore = _get_rag_concurrency()
     await asyncio.wait_for(semaphore.acquire(), timeout=RAG_REQUEST_TIMEOUT_SECONDS)
-    future: Future[None] | None = None
-    try:
-        future = loop.run_in_executor(_get_rag_executor(), _run)
-        future.add_done_callback(lambda _f: semaphore.release())
-    except BaseException:
-        if future is None:
-            semaphore.release()
-        raise
-
+    future = _submit_rag_job(loop, semaphore, _run)
     return queue, cancel_event, future
 
 
 async def _watch_disconnect(request: Request, cancel_event: threading.Event) -> None:
     """Poll for client disconnect and set cancel_event when detected."""
     while not cancel_event.is_set():
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(_DISCONNECT_POLL_SECONDS)
         if await request.is_disconnected():
             cancel_event.set()
             logger.info("Client disconnected — cancelling stream")
@@ -385,6 +380,7 @@ def models() -> dict[str, Any]:
         resp.raise_for_status()
         data = [model_entry(m["name"], _SERVER_START) for m in resp.json().get("models", [])]
     except Exception:
+        logger.warning("Failed to list Ollama models, returning default")
         data = [model_entry(GEN_MODEL, _SERVER_START)]
     return {"object": "list", "data": data}
 
