@@ -244,14 +244,19 @@ async def _run_rag_with_timeout(
         raise HTTPException(status_code=500, detail="RAG pipeline error") from e
 
 
-async def _acquire_rag_capacity(timeout: float) -> asyncio.Semaphore:
+async def _wait_for_capacity(timeout: float) -> asyncio.Semaphore:
+    """Acquire the RAG semaphore, raising TimeoutError if capacity is not available in time."""
     semaphore = _get_rag_concurrency()
+    await asyncio.wait_for(semaphore.acquire(), timeout=timeout)
+    return semaphore
+
+
+async def _acquire_rag_capacity(timeout: float) -> asyncio.Semaphore:
     try:
-        await asyncio.wait_for(semaphore.acquire(), timeout=timeout)
+        return await _wait_for_capacity(timeout)
     except TimeoutError:
         logger.warning("RAG pipeline timed out waiting for capacity after %.1fs", timeout)
         raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
-    return semaphore
 
 
 def _submit_rag_job(
@@ -293,8 +298,7 @@ async def _start_stream_worker(
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
-    semaphore = _get_rag_concurrency()
-    await asyncio.wait_for(semaphore.acquire(), timeout=RAG_REQUEST_TIMEOUT_SECONDS)
+    semaphore = await _wait_for_capacity(RAG_REQUEST_TIMEOUT_SECONDS)
     future = _submit_rag_job(loop, semaphore, _run)
     return queue, cancel_event, future
 

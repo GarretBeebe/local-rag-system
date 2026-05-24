@@ -14,7 +14,8 @@ from qdrant_client.models import PointStruct
 
 from api.embed import embed
 from ingest.index_documents import ensure_collection
-from settings import COLLECTION, get_qdrant_client
+from common.qdrant import get_qdrant_client
+from settings import COLLECTION
 
 
 def store_document(text: str) -> None:

@@ -46,6 +46,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_MAIN_LOOP_SLEEP_SECONDS = 5
+
 
 def load_config() -> dict[str, Any]:
     try:
@@ -285,12 +287,12 @@ def main() -> None:
 
     try:
         while True:
-            time.sleep(5)
+            time.sleep(_MAIN_LOOP_SLEEP_SECONDS)
     except KeyboardInterrupt:
         observer.stop()
-
-    observer.join()
-    worker.stop()
+    finally:
+        observer.join()
+        worker.stop()
 
 
 if __name__ == "__main__":

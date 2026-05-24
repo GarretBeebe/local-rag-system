@@ -11,8 +11,9 @@ Pass --vectors-only to skip the fingerprint reset (rarely needed):
 
 import argparse
 
+from common.qdrant import get_qdrant_client
 from indexer.fingerprint_store import clear_hashes, init_db
-from settings import COLLECTION, get_qdrant_client
+from settings import COLLECTION
 
 
 def main() -> None:

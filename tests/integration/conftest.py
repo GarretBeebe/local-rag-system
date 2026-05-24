@@ -14,7 +14,7 @@ import pytest
 @pytest.fixture(scope="session", autouse=True)
 def require_qdrant():
     """Skip the entire integration suite if Qdrant is not reachable."""
-    from settings import get_qdrant_client
+    from common.qdrant import get_qdrant_client
     try:
         get_qdrant_client().get_collections()
     except Exception as e:

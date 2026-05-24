@@ -19,7 +19,8 @@ from rank_bm25 import BM25Okapi
 
 from common.index_state import get_index_version
 from common.index_state import init_db as init_index_state
-from settings import COLLECTION, KEYWORD_REFRESH_INTERVAL, get_qdrant_client
+from common.qdrant import get_qdrant_client
+from settings import COLLECTION, KEYWORD_REFRESH_INTERVAL
 
 logger = logging.getLogger(__name__)
 

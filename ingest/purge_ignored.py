@@ -18,6 +18,7 @@ from pathlib import Path
 
 from common.config import load_yaml_config
 from common.index_state import bump_index_version
+from common.index_state import init_db as init_index_state
 from common.paths import is_indexable_path, normalize_extensions, normalize_path
 from indexer.fingerprint_store import init_db, list_all_paths
 from ingest.index_documents import remove_indexed_document
@@ -77,6 +78,7 @@ def find_ignored_paths(config: dict) -> list[str]:
 
 def purge_ignored(config_path: Path, *, apply: bool) -> int:
     init_db()
+    init_index_state()
     config = load_yaml_config(config_path, allow_empty=True)
     ignored = find_ignored_paths(config)
 

@@ -25,6 +25,7 @@ from sentence_transformers import CrossEncoder
 from api.embed import embed
 from api.keyword_index import KeywordIndex
 from api.timing import timed as _timed
+from common.qdrant import get_qdrant_client
 from settings import (
     ALLOWED_EXTENSIONS,
     COLLECTION,
@@ -34,7 +35,6 @@ from settings import (
     MMR_LAMBDA_MULT,
     RECALL_K,
     RERANK_MODEL,
-    get_qdrant_client,
 )
 
 logger = logging.getLogger(__name__)

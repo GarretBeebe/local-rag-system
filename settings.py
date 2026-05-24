@@ -10,10 +10,7 @@ Path resolution lives here so no other module needs __file__ manipulation:
 """
 
 import os
-import threading
 from pathlib import Path
-
-from qdrant_client import QdrantClient
 
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -163,19 +160,3 @@ def _validate_settings() -> None:
 
 
 _validate_settings()
-
-_qdrant_client: QdrantClient | None = None
-_qdrant_lock = threading.Lock()
-
-
-def get_qdrant_client() -> QdrantClient:
-    """Return the shared QdrantClient, creating it on first call."""
-    global _qdrant_client
-    if _qdrant_client is None:
-        with _qdrant_lock:
-            if _qdrant_client is None:
-                _qdrant_client = QdrantClient(
-                    url=f"http://{QDRANT_HOST}:{QDRANT_PORT}",
-                    api_key=QDRANT_API_KEY or None,
-                )
-    return _qdrant_client

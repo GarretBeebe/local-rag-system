@@ -94,7 +94,10 @@ def generate(
         json=_generate_payload(model, prompt, stream=False),
         timeout=timeout,
     )
-    data = r.json()
+    try:
+        data = r.json()
+    except ValueError as e:
+        raise RuntimeError(f"Ollama generate returned invalid JSON: {e}") from e
     if "response" not in data:
         raise RuntimeError(
             f"Ollama generate missing 'response' field: {data.get('error', data)}"

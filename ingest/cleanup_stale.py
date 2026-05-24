@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 
 from common.index_state import bump_index_version
+from common.index_state import init_db as init_index_state
 from indexer.fingerprint_store import init_db, list_all_paths
 from ingest.index_documents import remove_indexed_document
 
@@ -47,4 +48,5 @@ def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     init_db()
+    init_index_state()
     cleanup_stale()

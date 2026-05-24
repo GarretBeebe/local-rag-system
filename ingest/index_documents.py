@@ -31,13 +31,13 @@ from common.paths import has_allowed_extension, normalize_extensions, normalize_
 from common.types import IndexDecision
 from indexer.fingerprint_store import delete_hash
 from ingest.chunkers import chunk_document
+from common.qdrant import get_qdrant_client
 from settings import (
     ALLOWED_EXTENSIONS,
     COLLECTION,
     DOCS_PATH,
     MAX_FILE_SIZE,
     VECTOR_SIZE,
-    get_qdrant_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,9 +45,10 @@ _ALLOWED_EXTENSIONS = normalize_extensions(ALLOWED_EXTENSIONS)
 
 
 def ensure_collection() -> None:
-    if not get_qdrant_client().collection_exists(COLLECTION):
+    client = get_qdrant_client()
+    if not client.collection_exists(COLLECTION):
         logger.info("Collection missing — creating new collection")
-        get_qdrant_client().create_collection(
+        client.create_collection(
             collection_name=COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
@@ -99,13 +100,14 @@ def _upsert_chunks(path: Path, points: list[PointStruct]) -> IndexDecision:
     for p in points:
         p.payload["index_version"] = index_version
         p.payload["active"] = True
+    client = get_qdrant_client()
     try:
-        get_qdrant_client().upsert(collection_name=COLLECTION, points=points)
+        client.upsert(collection_name=COLLECTION, points=points)
     except Exception as e:
         logger.error("Upsert failed for %s: %s", path, e)
         return IndexDecision.FAILED
     try:
-        get_qdrant_client().delete(
+        client.delete(
             collection_name=COLLECTION,
             points_selector=Filter(
                 must=[FieldCondition(key="filepath", match=MatchValue(value=filepath))],
