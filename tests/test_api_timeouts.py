@@ -21,6 +21,45 @@ def test_embed_passes_configured_timeout_to_http_call(monkeypatch):
     assert captured["timeout"] == OLLAMA_EMBED_TIMEOUT_SECONDS
 
 
+def test_embed_batch_passes_configured_timeout_to_http_call(monkeypatch):
+    """embed_batch() must forward OLLAMA_EMBED_TIMEOUT_SECONDS to the batch endpoint."""
+    from api.embed import embed_batch
+    from settings import OLLAMA_EMBED_TIMEOUT_SECONDS
+
+    captured = {}
+
+    def fake_post_with_retry(path, **kwargs):
+        captured["path"] = path
+        captured["timeout"] = kwargs.get("timeout")
+        captured["json"] = kwargs.get("json")
+        resp = MagicMock()
+        resp.json.return_value = {"embeddings": [[0.1] * 768, [0.2] * 768]}
+        return resp
+
+    monkeypatch.setattr("api.embed.ollama_client.post_with_retry", fake_post_with_retry)
+    vectors = embed_batch(["hello", "world"])
+    assert len(vectors) == 2
+    assert captured["path"] == "/api/embed"
+    assert captured["timeout"] == OLLAMA_EMBED_TIMEOUT_SECONDS
+    assert captured["json"]["input"] == ["hello", "world"]
+
+
+def test_embed_batch_rejects_vector_count_mismatch(monkeypatch):
+    from api.embed import embed_batch
+
+    def fake_post_with_retry(path, **kwargs):
+        resp = MagicMock()
+        resp.json.return_value = {"embeddings": [[0.1] * 768]}
+        return resp
+
+    monkeypatch.setattr("api.embed.ollama_client.post_with_retry", fake_post_with_retry)
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="returned 1 vectors for 2 texts"):
+        embed_batch(["hello", "world"])
+
+
 def test_generate_passes_configured_timeout_to_http_call(monkeypatch):
     """generate() must forward OLLAMA_GENERATE_TIMEOUT_SECONDS to the Ollama HTTP call."""
     from api import ollama_client
@@ -38,6 +77,26 @@ def test_generate_passes_configured_timeout_to_http_call(monkeypatch):
     monkeypatch.setattr("api.ollama_client.post_with_retry", fake_post_with_retry)
     ollama_client.generate("test prompt", "test-model")
     assert captured["timeout"] == OLLAMA_GENERATE_TIMEOUT_SECONDS
+
+
+def test_generation_capacity_timeout_releases_slot(monkeypatch):
+    import threading
+
+    import pytest
+
+    from api import ollama_client
+
+    monkeypatch.setattr(ollama_client, "_generation_slots", threading.BoundedSemaphore(1))
+    ollama_client._generation_slots.acquire()
+
+    with pytest.raises(RuntimeError, match="generation capacity"), ollama_client._generation_slot(
+        timeout=0.01
+    ):
+        pass
+
+    ollama_client._generation_slots.release()
+    assert ollama_client._generation_slots.acquire(timeout=0.01)
+    ollama_client._generation_slots.release()
 
 
 def test_stream_generate_raises_on_ollama_error_payload(monkeypatch):

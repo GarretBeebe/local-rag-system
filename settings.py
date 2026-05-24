@@ -53,6 +53,7 @@ OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
 # API concurrency and rate limiting
 RAG_EXECUTOR_WORKERS = int(os.environ.get("RAG_EXECUTOR_WORKERS", "4"))
 RAG_CONCURRENCY_LIMIT = int(os.environ.get("RAG_CONCURRENCY_LIMIT", "4"))
+GENERATION_CONCURRENCY_LIMIT = int(os.environ.get("GENERATION_CONCURRENCY_LIMIT", "1"))
 RATE_WINDOW_SECONDS = float(os.environ.get("RATE_WINDOW_SECONDS", "60.0"))
 RATE_MAX_REQUESTS = int(os.environ.get("RATE_MAX_REQUESTS", "30"))
 RATE_MAX_LOGIN_REQUESTS = int(os.environ.get("RATE_MAX_LOGIN_REQUESTS", "10"))
@@ -75,6 +76,11 @@ MMR_K = int(os.environ.get("MMR_K", "12"))
 FINAL_K = int(os.environ.get("FINAL_K", "4"))
 MMR_LAMBDA_MULT = float(os.environ.get("MMR_LAMBDA_MULT", "0.7"))
 KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "30"))
+KEYWORD_SEARCH_ENABLED = os.environ.get("KEYWORD_SEARCH_ENABLED", "true").lower() != "false"
+KEYWORD_INDEX_MAX_DOCS = int(os.environ.get("KEYWORD_INDEX_MAX_DOCS", "100000"))
+KEYWORD_INDEX_MAX_TOKENS = int(os.environ.get("KEYWORD_INDEX_MAX_TOKENS", "5000000"))
+KEYWORD_MIN_QUERY_TOKENS = int(os.environ.get("KEYWORD_MIN_QUERY_TOKENS", "1"))
+KEYWORD_MAX_QUERY_TOKENS = int(os.environ.get("KEYWORD_MAX_QUERY_TOKENS", "32"))
 MAX_CHUNK_CHARS = int(os.environ.get("MAX_CHUNK_CHARS", "2000"))
 MAX_MD_CHUNK = MAX_CHUNK_CHARS  # intentionally aliased — both chunkers enforce the same limit
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))
@@ -99,6 +105,7 @@ def _validate_settings() -> None:
         "SESSION_EXPIRY_HOURS": SESSION_EXPIRY_HOURS,
         "RAG_EXECUTOR_WORKERS": RAG_EXECUTOR_WORKERS,
         "RAG_CONCURRENCY_LIMIT": RAG_CONCURRENCY_LIMIT,
+        "GENERATION_CONCURRENCY_LIMIT": GENERATION_CONCURRENCY_LIMIT,
         "RATE_MAX_REQUESTS": RATE_MAX_REQUESTS,
         "RATE_MAX_LOGIN_REQUESTS": RATE_MAX_LOGIN_REQUESTS,
         "OLLAMA_NUM_CTX": OLLAMA_NUM_CTX,
@@ -106,6 +113,10 @@ def _validate_settings() -> None:
         "MMR_K": MMR_K,
         "FINAL_K": FINAL_K,
         "KEYWORD_REFRESH_INTERVAL": KEYWORD_REFRESH_INTERVAL,
+        "KEYWORD_INDEX_MAX_DOCS": KEYWORD_INDEX_MAX_DOCS,
+        "KEYWORD_INDEX_MAX_TOKENS": KEYWORD_INDEX_MAX_TOKENS,
+        "KEYWORD_MIN_QUERY_TOKENS": KEYWORD_MIN_QUERY_TOKENS,
+        "KEYWORD_MAX_QUERY_TOKENS": KEYWORD_MAX_QUERY_TOKENS,
         "MAX_CHUNK_CHARS": MAX_CHUNK_CHARS,
         "CHUNK_SIZE": CHUNK_SIZE,
         "MAX_CHAT_MESSAGES": MAX_CHAT_MESSAGES,
@@ -150,6 +161,11 @@ def _validate_settings() -> None:
         raise ValueError(f"settings: FINAL_K must be <= MMR_K, got {FINAL_K} > {MMR_K}")
     if MMR_K > RECALL_K:
         raise ValueError(f"settings: MMR_K must be <= RECALL_K, got {MMR_K} > {RECALL_K}")
+    if KEYWORD_MIN_QUERY_TOKENS > KEYWORD_MAX_QUERY_TOKENS:
+        raise ValueError(
+            "settings: KEYWORD_MIN_QUERY_TOKENS must be <= KEYWORD_MAX_QUERY_TOKENS, "
+            f"got {KEYWORD_MIN_QUERY_TOKENS} > {KEYWORD_MAX_QUERY_TOKENS}"
+        )
     if MAX_CHAT_QUESTION_CHARS > MAX_CHAT_TOTAL_CHARS:
         raise ValueError(
             "settings: MAX_CHAT_QUESTION_CHARS must be <= MAX_CHAT_TOTAL_CHARS, "

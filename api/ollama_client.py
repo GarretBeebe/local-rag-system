@@ -5,12 +5,15 @@ import logging
 import threading
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import requests
 from requests import RequestException
 
+from api.timing import timed as _timed
 from settings import (
+    GENERATION_CONCURRENCY_LIMIT,
     OLLAMA_BASE_URL,
     OLLAMA_GENERATE_TIMEOUT_SECONDS,
     OLLAMA_MAX_RETRIES,
@@ -21,6 +24,8 @@ from settings import (
 logger = logging.getLogger(__name__)
 
 _thread_local = threading.local()
+_generation_slots = threading.BoundedSemaphore(GENERATION_CONCURRENCY_LIMIT)
+_GENERATION_SLOT_POLL_SECONDS = 0.1
 
 
 def _url(path: str) -> str:
@@ -88,6 +93,31 @@ def _generate_payload(model: str, prompt: str, *, stream: bool) -> dict[str, Any
     }
 
 
+@contextmanager
+def _generation_slot(
+    *,
+    cancel: threading.Event | None = None,
+    timeout: float = OLLAMA_GENERATE_TIMEOUT_SECONDS,
+) -> Iterator[None]:
+    """Bound concurrent Ollama generations so local model hardware is not oversubscribed."""
+    start = time.monotonic()
+    acquired = False
+    with _timed("generation_capacity_wait"):
+        while not acquired:
+            if cancel and cancel.is_set():
+                raise RuntimeError("Ollama generation cancelled while waiting for capacity")
+            remaining = timeout - (time.monotonic() - start)
+            if remaining <= 0:
+                raise RuntimeError("Timed out waiting for Ollama generation capacity")
+            acquired = _generation_slots.acquire(
+                timeout=min(_GENERATION_SLOT_POLL_SECONDS, remaining)
+            )
+    try:
+        yield
+    finally:
+        _generation_slots.release()
+
+
 def generate(
     prompt: str,
     model: str,
@@ -95,12 +125,13 @@ def generate(
     cancel: threading.Event | None = None,
 ) -> str:
     """Return a complete generated response from Ollama."""
-    r = post_with_retry(
-        "/api/generate",
-        cancel=cancel,
-        json=_generate_payload(model, prompt, stream=False),
-        timeout=timeout,
-    )
+    with _generation_slot(cancel=cancel, timeout=timeout):
+        r = post_with_retry(
+            "/api/generate",
+            cancel=cancel,
+            json=_generate_payload(model, prompt, stream=False),
+            timeout=timeout,
+        )
     try:
         data = r.json()
     except ValueError as e:
@@ -119,7 +150,7 @@ def stream_generate(
     cancel: threading.Event | None = None,
 ) -> Iterator[str]:
     """Yield text chunks from Ollama's streaming generation API."""
-    with _get_session().post(
+    with _generation_slot(cancel=cancel, timeout=timeout), _get_session().post(
         _url("/api/generate"),
         json=_generate_payload(model, prompt, stream=True),
         stream=True,

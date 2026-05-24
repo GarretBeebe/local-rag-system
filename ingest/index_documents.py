@@ -26,12 +26,12 @@ from qdrant_client.models import (
 )
 from tqdm import tqdm
 
-from api.embed import embed
+from api.embed import embed_batch
 from common.paths import has_allowed_extension, normalize_extensions, normalize_path
+from common.qdrant import get_qdrant_client
 from common.types import IndexDecision
 from indexer.fingerprint_store import delete_hash
 from ingest.chunkers import chunk_document
-from common.qdrant import get_qdrant_client
 from settings import (
     ALLOWED_EXTENSIONS,
     COLLECTION,
@@ -81,9 +81,12 @@ def _embed_chunks(
     path: Path, filepath: str, chunks: list[str], document_id: str
 ) -> list[PointStruct]:
     """Embed each chunk and return PointStructs with metadata."""
+    vectors = embed_batch(chunks)
+    if len(vectors) != len(chunks):
+        raise RuntimeError(f"Expected {len(chunks)} embeddings, got {len(vectors)}")
+
     points = []
-    for i, chunk in enumerate(chunks):
-        vec = embed(chunk)
+    for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True)):
         points.append(
             PointStruct(
                 id=str(uuid.uuid4()),
