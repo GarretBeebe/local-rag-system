@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 
 from common.paths import normalize_path
+from common.qdrant import get_qdrant_client
 from indexer.fingerprint_store import delete_hash, get_hash, upsert_hash
 from ingest.index_documents import delete_document
-from common.qdrant import get_qdrant_client
 from settings import COLLECTION, MAX_FILE_SIZE
 
 pytestmark = pytest.mark.integration
