@@ -19,7 +19,7 @@ from pathlib import Path
 from common.config import load_yaml_config
 from common.index_state import bump_index_version
 from common.index_state import init_db as init_index_state
-from common.paths import is_indexable_path, normalize_extensions, normalize_path
+from common.paths import is_indexable_path, is_under_any_root, normalize_extensions, normalize_path
 from indexer.fingerprint_store import init_db, list_all_paths
 from ingest.index_documents import remove_indexed_document
 from settings import ALLOWED_EXTENSIONS, CONFIG_PATH
@@ -40,10 +40,6 @@ def _iter_accessible_roots(config: dict) -> list[Path]:
         else:
             logger.warning("Skipping missing watch root: %s", root)
     return roots
-
-
-def _is_under_roots(path: Path, roots: list[Path]) -> bool:
-    return any(path.is_relative_to(root) for root in roots)
 
 
 def find_ignored_paths(config: dict) -> list[str]:
@@ -68,7 +64,7 @@ def find_ignored_paths(config: dict) -> list[str]:
     ignored = []
     for filepath in list_all_paths():
         path = Path(filepath)
-        if not _is_under_roots(path, accessible_roots):
+        if not is_under_any_root(path, accessible_roots):
             continue
         if not is_indexable_path(path, allowed_ext, ignore_patterns):
             ignored.append(filepath)

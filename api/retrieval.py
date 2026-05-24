@@ -23,7 +23,7 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 from sentence_transformers import CrossEncoder
 
 from api.embed import embed
-from api.keyword_index import KeywordIndex
+from api.keyword_index import KeywordIndex, KeywordResult
 from api.timing import timed as _timed
 from common.qdrant import get_qdrant_client
 from settings import (
@@ -174,9 +174,10 @@ def mmr_select(
     remaining = candidates[:]
 
     while remaining and len(selected) < top_n:
-        best = max(remaining, key=lambda c: mmr_score(c, selected))
-        selected.append(best)
-        remaining.remove(best)
+        best_idx = max(range(len(remaining)), key=lambda i: mmr_score(remaining[i], selected))
+        selected.append(remaining[best_idx])
+        remaining[best_idx] = remaining[-1]
+        remaining.pop()
 
     return selected
 
@@ -215,6 +216,7 @@ def hybrid_recall(
     vector_results = qdrant_recall(question_vec, limit=limit,
                                    with_vectors=MMR_ENABLED, query_filter=query_filter)
 
+    keyword_results: list[KeywordResult]
     try:
         keyword_results = _get_keyword_index().search(question, limit=limit)
     except Exception as e:

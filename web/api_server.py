@@ -68,7 +68,7 @@ _SERVER_START = int(time.time())
 _WEB_DIR = Path(__file__).parent
 _STATIC_DIR = _WEB_DIR / "static"
 _AUTH_COOKIE = "rag_token"
-_DISCONNECT_POLL_SECONDS = 0.5
+_DISCONNECT_POLL_SECONDS = 2.0
 _RAG_CAPACITY_TIMEOUT_DETAIL = "RAG pipeline timed out waiting for capacity."
 # Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
 # preventing timing-based username enumeration.
@@ -142,7 +142,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             with suppress(asyncio.CancelledError):
                 await t
         api.retrieval.shutdown()
-        _get_rag_executor().shutdown(wait=False)
+        futs = [_get_rag_executor().submit(ollama_client.close_session)
+                for _ in range(RAG_EXECUTOR_WORKERS)]
+        for f in futs:
+            with suppress(Exception):
+                f.result(timeout=2)
+        _get_rag_executor().shutdown(wait=True)
 
 
 app = FastAPI(title="Local RAG API", lifespan=lifespan)

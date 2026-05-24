@@ -13,6 +13,7 @@ from pathlib import Path
 
 from common.index_state import bump_index_version
 from common.index_state import init_db as init_index_state
+from common.paths import is_under_any_root
 from indexer.fingerprint_store import init_db, list_all_paths
 from ingest.index_documents import remove_indexed_document
 
@@ -31,9 +32,7 @@ def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
     removed = 0
     for filepath in paths:
         p = Path(filepath)
-        if accessible_roots is not None and not any(
-            p.is_relative_to(root) for root in accessible_roots
-        ):
+        if accessible_roots is not None and not is_under_any_root(p, accessible_roots):
             continue
         if not p.exists():
             logger.info("Removing stale entry: %s", filepath)

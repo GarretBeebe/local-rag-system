@@ -11,6 +11,7 @@ Pass --vectors-only to skip the fingerprint reset (rarely needed):
 
 import argparse
 
+import ingest.index_documents as index_documents
 from common.qdrant import get_qdrant_client
 from indexer.fingerprint_store import clear_hashes, init_db
 from settings import COLLECTION
@@ -28,6 +29,7 @@ def main() -> None:
     client = get_qdrant_client()
     if client.collection_exists(COLLECTION):
         client.delete_collection(COLLECTION)
+    index_documents._collection_ensured = False
     print("Vector collection removed.")
 
     if not args.vectors_only:

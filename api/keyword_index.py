@@ -13,7 +13,7 @@ import heapq
 import logging
 import threading
 import time
-from typing import Any
+from typing import Any, TypedDict
 
 from rank_bm25 import BM25Okapi
 
@@ -25,6 +25,12 @@ from settings import COLLECTION, KEYWORD_REFRESH_INTERVAL
 logger = logging.getLogger(__name__)
 
 _SCROLL_PAGE_SIZE = 1000
+
+
+class KeywordResult(TypedDict):
+    id: str | int
+    payload: dict[str, Any]
+    bm25_score: float
 
 
 class KeywordIndex:
@@ -128,7 +134,7 @@ class KeywordIndex:
             logger.warning("KeywordIndex refresh failed: %s", e, exc_info=True)
             return False
 
-    def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    def search(self, query: str, limit: int = 10) -> list[KeywordResult]:
         with self._lock:
             bm25, ids = self._bm25, self._ids
         if bm25 is None:

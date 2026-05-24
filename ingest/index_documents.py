@@ -42,9 +42,17 @@ from settings import (
 
 logger = logging.getLogger(__name__)
 _ALLOWED_EXTENSIONS = normalize_extensions(ALLOWED_EXTENSIONS)
+_collection_ensured: bool = False
+
+
+def _filepath_condition(filepath: str) -> FieldCondition:
+    return FieldCondition(key="filepath", match=MatchValue(value=filepath))
 
 
 def ensure_collection() -> None:
+    global _collection_ensured
+    if _collection_ensured:
+        return
     client = get_qdrant_client()
     if not client.collection_exists(COLLECTION):
         logger.info("Collection missing — creating new collection")
@@ -52,6 +60,7 @@ def ensure_collection() -> None:
             collection_name=COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
+    _collection_ensured = True
 
 
 def _read_file(path: Path) -> str | None:
@@ -68,10 +77,11 @@ def _read_file(path: Path) -> str | None:
         return None
 
 
-def _embed_chunks(path: Path, chunks: list[str], document_id: str) -> list[PointStruct]:
+def _embed_chunks(
+    path: Path, filepath: str, chunks: list[str], document_id: str
+) -> list[PointStruct]:
     """Embed each chunk and return PointStructs with metadata."""
     points = []
-    normalized = normalize_path(path)
     for i, chunk in enumerate(chunks):
         vec = embed(chunk)
         points.append(
@@ -82,7 +92,7 @@ def _embed_chunks(path: Path, chunks: list[str], document_id: str) -> list[Point
                     "text": chunk,
                     "document_id": document_id,
                     "filename": path.name,
-                    "filepath": normalized,
+                    "filepath": filepath,
                     "chunk_index": i,
                     "chunk_total": 0,  # corrected below once all chunks are embedded
                 },
@@ -93,9 +103,8 @@ def _embed_chunks(path: Path, chunks: list[str], document_id: str) -> list[Point
     return points
 
 
-def _upsert_chunks(path: Path, points: list[PointStruct]) -> IndexDecision:
-    """Upsert replacement points then delete stale vectors for path."""
-    filepath = normalize_path(path)
+def _upsert_chunks(filepath: str, points: list[PointStruct]) -> IndexDecision:
+    """Upsert replacement points then delete stale vectors for filepath."""
     index_version = str(uuid.uuid4())
     for p in points:
         p.payload["index_version"] = index_version
@@ -104,13 +113,13 @@ def _upsert_chunks(path: Path, points: list[PointStruct]) -> IndexDecision:
     try:
         client.upsert(collection_name=COLLECTION, points=points)
     except Exception as e:
-        logger.error("Upsert failed for %s: %s", path, e)
+        logger.error("Upsert failed for %s: %s", filepath, e)
         return IndexDecision.FAILED
     try:
         client.delete(
             collection_name=COLLECTION,
             points_selector=Filter(
-                must=[FieldCondition(key="filepath", match=MatchValue(value=filepath))],
+                must=[_filepath_condition(filepath)],
                 must_not=[
                     FieldCondition(key="index_version", match=MatchValue(value=index_version))
                 ],
@@ -119,7 +128,7 @@ def _upsert_chunks(path: Path, points: list[PointStruct]) -> IndexDecision:
     except Exception as e:
         logger.error(
             "Stale vector cleanup failed for %s — fingerprint not updated, "
-            "will retry on next poll: %s", path, e,
+            "will retry on next poll: %s", filepath, e,
         )
         return IndexDecision.FAILED
     return IndexDecision.INDEXED
@@ -150,7 +159,7 @@ def index_file(path: Path) -> IndexDecision:
 
     t0 = time.monotonic()
     try:
-        points = _embed_chunks(path, chunks, document_id)
+        points = _embed_chunks(path, normalized_path, chunks, document_id)
     except Exception as e:
         logger.error("Embedding failed for %s: %s", path, e)
         return IndexDecision.FAILED
@@ -161,7 +170,7 @@ def index_file(path: Path) -> IndexDecision:
         return IndexDecision.FAILED
 
     t0 = time.monotonic()
-    result = _upsert_chunks(path, points)
+    result = _upsert_chunks(normalized_path, points)
     elapsed["upsert"] = time.monotonic() - t0
 
     if result == IndexDecision.INDEXED:
@@ -175,16 +184,15 @@ def delete_document(filepath: Path | str) -> None:
     logger.info("Deleting vectors for: %s", normalized_path)
     get_qdrant_client().delete(
         collection_name=COLLECTION,
-        points_selector=Filter(
-            must=[FieldCondition(key="filepath", match=MatchValue(value=normalized_path))]
-        ),
+        points_selector=Filter(must=[_filepath_condition(normalized_path)]),
     )
 
 
 def remove_indexed_document(filepath: Path | str) -> None:
     """Delete Qdrant vectors and fingerprint record for a document."""
-    delete_document(filepath)
-    delete_hash(normalize_path(filepath))
+    normalized_path = normalize_path(filepath)
+    delete_document(normalized_path)
+    delete_hash(normalized_path)
 
 
 def main() -> None:

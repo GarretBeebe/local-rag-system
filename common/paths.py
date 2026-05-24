@@ -60,6 +60,11 @@ def matches_ignore_pattern(path: str | Path, ignore_patterns: Iterable[str]) -> 
     )
 
 
+def is_under_any_root(path: Path, roots: list[Path]) -> bool:
+    """Return True if path falls under any of the given roots."""
+    return any(path.is_relative_to(root) for root in roots)
+
+
 def is_indexable_path(
     path: str | Path,
     allowed_extensions: Iterable[str],

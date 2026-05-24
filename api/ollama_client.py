@@ -33,6 +33,13 @@ def _get_session() -> requests.Session:
     return _thread_local.session
 
 
+def close_session() -> None:
+    """Close and discard the calling thread's Ollama session. Safe to call from any thread."""
+    if hasattr(_thread_local, "session"):
+        _thread_local.session.close()
+        del _thread_local.session
+
+
 def post(path: str, **kwargs: Any) -> requests.Response:
     return _get_session().post(_url(path), **kwargs)
 
