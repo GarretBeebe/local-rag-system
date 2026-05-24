@@ -286,17 +286,24 @@ async def _start_stream_worker(
 
     Raises TimeoutError if the semaphore cannot be acquired within RAG_REQUEST_TIMEOUT_SECONDS.
     """
-    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
+    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue(maxsize=32)
     cancel_event = threading.Event()
 
     def _run():
         try:
             for text in ask_stream_sync(question, model, rag_mode, cancel_event):
-                loop.call_soon_threadsafe(queue.put_nowait, text)
+                coro = queue.put(text)
+                try:
+                    asyncio.run_coroutine_threadsafe(coro, loop).result()
+                except RuntimeError:
+                    coro.close()  # loop closed; prevent "coroutine never awaited" warning
+                    return
         except Exception as exc:
-            loop.call_soon_threadsafe(queue.put_nowait, exc)
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
         finally:
-            loop.call_soon_threadsafe(queue.put_nowait, None)
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(queue.put_nowait, None)
 
     semaphore = await _wait_for_capacity(RAG_REQUEST_TIMEOUT_SECONDS)
     future = _submit_rag_job(loop, semaphore, _run)

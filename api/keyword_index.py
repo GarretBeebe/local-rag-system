@@ -33,7 +33,6 @@ class KeywordIndex:
         self._lock = threading.Lock()
         self._refresh_interval = refresh_interval
         self._docs: list[list[str]] = []
-        self._payloads: list[dict[str, Any]] = []
         self._ids: list[str | int] = []
         self._bm25: BM25Okapi | None = None
         self.known_filenames: set[str] = set()
@@ -67,16 +66,16 @@ class KeywordIndex:
 
     def _build(self) -> None:
         t0 = time.monotonic()
-        docs, payloads, ids, filenames = [], [], [], set()
+        docs, ids, filenames = [], [], set()
         offset = None
         client = get_qdrant_client()
         try:
             if not client.collection_exists(COLLECTION):
-                self._replace_index(docs, payloads, ids, filenames)
+                self._replace_index(docs, ids, filenames)
                 logger.info("KeywordIndex built: collection %s does not exist yet", COLLECTION)
                 return
         except Exception as e:
-            self._replace_index(docs, payloads, ids, filenames)
+            self._replace_index(docs, ids, filenames)
             logger.warning("KeywordIndex collection check failed: %s", e, exc_info=True)
             return
         while True:
@@ -90,7 +89,6 @@ class KeywordIndex:
                 filename = p.payload.get("filename", "")
                 text = f"{filename} {p.payload.get('text', '')}"
                 docs.append(text.lower().split())
-                payloads.append(p.payload)
                 ids.append(p.id)
                 if filename:
                     filenames.add(filename)
@@ -99,19 +97,18 @@ class KeywordIndex:
             offset = next_offset
         bm25 = BM25Okapi(docs) if docs else None
         elapsed = time.monotonic() - t0
-        self._replace_index(docs, payloads, ids, filenames, bm25)
+        self._replace_index(docs, ids, filenames, bm25)
         logger.info("KeywordIndex built: %d docs in %.2fs", len(docs), elapsed)
 
     def _replace_index(
         self,
         docs: list[list[str]],
-        payloads: list[dict[str, Any]],
         ids: list[str | int],
         filenames: set[str],
         bm25: BM25Okapi | None = None,
     ) -> None:
         with self._lock:
-            self._docs, self._payloads, self._ids, self._bm25 = docs, payloads, ids, bm25
+            self._docs, self._ids, self._bm25 = docs, ids, bm25
             self.known_filenames = filenames
 
     def _refresh_loop(self, interval: int) -> None:
@@ -133,14 +130,24 @@ class KeywordIndex:
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
-            bm25, ids, payloads = self._bm25, self._ids, self._payloads
+            bm25, ids = self._bm25, self._ids
         if bm25 is None:
             return []
         tokens = query.lower().split()
         scores = bm25.get_scores(tokens)
-        pairs = ((s, pid, pl) for s, pid, pl in zip(scores, ids, payloads, strict=False) if s > 0)
+        pairs = [(s, pid) for s, pid in zip(scores, ids, strict=False) if s > 0]
         ranked = heapq.nlargest(limit, pairs, key=lambda x: x[0])
+        if not ranked:
+            return []
+        top_ids = [pid for _, pid in ranked]
+        points = get_qdrant_client().retrieve(
+            collection_name=COLLECTION,
+            ids=top_ids,
+            with_payload=True,
+            with_vectors=False,
+        )
+        payload_by_id = {p.id: p.payload for p in points}
         return [
-            {"id": pid, "payload": payload, "bm25_score": score}
-            for score, pid, payload in ranked
+            {"id": pid, "payload": payload_by_id.get(pid, {}), "bm25_score": score}
+            for score, pid in ranked
         ]
