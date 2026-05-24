@@ -452,6 +452,7 @@ Endpoints
 | `GET` | `/ui/` | Built-in web chat UI assets (no auth required to load) |
 | `POST` | `/auth/login` | Exchange username/password for an HttpOnly session cookie |
 | `POST` | `/auth/logout` | Clear the browser session cookie |
+| `GET` | `/auth/status` | Returns `{"authenticated": true/false}`; always 200 — used by the UI to check session state on load |
 | `GET` | `/v1/models` | List available models |
 | `GET` | `/models` | Alias for `/v1/models` |
 | `POST` | `/v1/chat/completions` | RAG-backed chat completion (supports `"stream": true`) |
@@ -702,7 +703,7 @@ Runtime controls:
 
 | Control | Detail |
 | --- | --- |
-| API key auth | Set `API_KEY` in `.env`. Protected API endpoints accept `Authorization: Bearer <key>` and compare it with `hmac.compare_digest` (timing-safe). Exempt paths are `/healthz`, `/favicon.ico`, `/ui/*`, `/auth/login`, and `/auth/logout`. |
+| API key auth | Set `API_KEY` in `.env`. Protected API endpoints accept `Authorization: Bearer <key>` and compare it with `hmac.compare_digest` (timing-safe). Exempt paths are `/healthz`, `/favicon.ico`, `/ui/*`, `/auth/login`, `/auth/logout`, and `/auth/status`. |
 | Web UI auth | Browser users log in with username/password; server creates an opaque session token stored in `data/users.sqlite3` and sets an HttpOnly cookie. No signing secret required. Session lifetime is configurable via `SESSION_EXPIRY_HOURS` (default 8 hours). Logout immediately revokes the session. Credentials are stored as bcrypt hashes. |
 | Auth disabled local mode | Startup succeeds without any auth unless `ALLOW_INSECURE_LOCALONLY=true` is set; all non-exempt endpoints return 401 by default. Set `ALLOW_INSECURE_LOCALONLY=true` only for local development. |
 | Rate limiting | General API requests are limited to 30 requests per minute per IP. `/auth/login` uses a separate tighter 10 attempts per minute per-IP bucket. Returns `429` when exceeded. |
