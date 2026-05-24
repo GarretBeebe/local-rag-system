@@ -236,7 +236,9 @@ const $ = id => document.getElementById(id);
     (async () => {
       try {
         const res = await apiFetch('/auth/status');
-        if (!res || res.status === 401) { showLogin(); return; }
+        if (!res || !res.ok) { showLogin(); return; }
+        const { authenticated } = await res.json();
+        if (!authenticated) { showLogin(); return; }
         await showChat();
       } catch {
         showLogin();
