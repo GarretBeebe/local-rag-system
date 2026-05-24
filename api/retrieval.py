@@ -204,7 +204,7 @@ def rerank(question: str, candidates: list[Chunk], top_n: int = FINAL_K) -> list
 def hybrid_recall(
     question: str,
     question_vec: list[float],
-    limit: int = 15,
+    limit: int = RECALL_K,
     filename: str | None = None,
 ) -> list[Chunk]:
     """Combine dense vector recall from Qdrant with BM25 keyword search results."""

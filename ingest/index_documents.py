@@ -53,14 +53,6 @@ def ensure_collection() -> None:
         )
 
 
-def load_files() -> list[Path]:
-    return [
-        p
-        for p in DOCS_PATH.rglob("*")
-        if p.is_file() and has_allowed_extension(p, _ALLOWED_EXTENSIONS)
-    ]
-
-
 def _read_file(path: Path) -> str | None:
     """Return file text, or None if the file should be skipped."""
     if path.stat().st_size > MAX_FILE_SIZE:
@@ -194,7 +186,11 @@ def remove_indexed_document(filepath: Path | str) -> None:
 
 
 def main() -> None:
-    files = load_files()
+    files = [
+        p
+        for p in DOCS_PATH.rglob("*")
+        if p.is_file() and has_allowed_extension(p, _ALLOWED_EXTENSIONS)
+    ]
     print(f"Found {len(files)} files to index")
 
     if not files:

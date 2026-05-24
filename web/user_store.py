@@ -12,8 +12,6 @@ from common.sqlite_store import SqliteStore
 from settings import DATA_DIR
 
 DB_PATH = DATA_DIR / "users.sqlite3"
-_SECONDS_PER_HOUR = 3600
-
 _store = SqliteStore(DB_PATH)
 
 
@@ -77,7 +75,7 @@ def list_users() -> list[str]:
 
 def create_session(username: str, expiry_hours: int) -> str:
     token = secrets.token_hex(32)
-    expires_at = time.time() + expiry_hours * _SECONDS_PER_HOUR
+    expires_at = time.time() + expiry_hours * 3600
     conn = _store.conn
     with conn:
         conn.execute(

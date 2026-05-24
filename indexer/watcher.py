@@ -99,7 +99,7 @@ def _index_if_changed(path: str) -> IndexDecision:
 
 class IndexWorker:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._queue: Queue[str | None] = Queue()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -133,7 +133,7 @@ class WatchHandler(FileSystemEventHandler):
         config: dict[str, Any],
         worker: IndexWorker,
         required_mount_roots: list[Path],
-    ):
+    ) -> None:
         self.allowed_ext = normalize_extensions(
             config.get("allowed_extensions", ALLOWED_EXTENSIONS)
         )

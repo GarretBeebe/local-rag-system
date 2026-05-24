@@ -231,14 +231,11 @@ const $ = id => document.getElementById(id);
       }
     });
 
-    inputEl.addEventListener('input', () => {
-    });
-
     // -- Init ----------------------------------------------------------------
 
     (async () => {
       try {
-        const res = await apiFetch('/v1/models');
+        const res = await apiFetch('/auth/status');
         if (!res || res.status === 401) { showLogin(); return; }
         await showChat();
       } catch {

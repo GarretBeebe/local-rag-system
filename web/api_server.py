@@ -19,7 +19,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
@@ -68,7 +68,6 @@ _SERVER_START = int(time.time())
 _WEB_DIR = Path(__file__).parent
 _STATIC_DIR = _WEB_DIR / "static"
 _AUTH_COOKIE = "rag_token"
-_SECONDS_PER_HOUR = 3600
 _DISCONNECT_POLL_SECONDS = 0.5
 _RAG_CAPACITY_TIMEOUT_DETAIL = "RAG pipeline timed out waiting for capacity."
 # Precomputed sentinel so login always runs bcrypt regardless of whether the username exists,
@@ -150,6 +149,11 @@ app = FastAPI(title="Local RAG API", lifespan=lifespan)
 app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")
 
 
+def _extract_bearer_token(request: Request) -> str:
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    return token or request.cookies.get(_AUTH_COOKIE, "")
+
+
 @app.middleware("http")
 async def security_middleware(request: Request, call_next: Callable[..., Any]) -> Response:
     request_id = uuid.uuid4().hex[:12]
@@ -172,12 +176,11 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]) -
     if not await check_rate_limit(client_ip):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
-    if not ALLOW_INSECURE_LOCALONLY:
-        token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        if not token:
-            token = request.cookies.get(_AUTH_COOKIE, "")
-        if not is_valid_token(token):
-            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    if request.url.path == "/auth/status":
+        return await call_next(request)
+
+    if not ALLOW_INSECURE_LOCALONLY and not is_valid_token(_extract_bearer_token(request)):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
     return await call_next(request)
 
@@ -437,7 +440,7 @@ async def login(request: Request, response: Response, credentials: LoginRequest)
         httponly=True,
         secure=is_secure,
         samesite="lax",
-        max_age=SESSION_EXPIRY_HOURS * _SECONDS_PER_HOUR,
+        max_age=SESSION_EXPIRY_HOURS * 3600,
         path="/",
     )
     return {"ok": True}
@@ -450,6 +453,13 @@ async def logout(request: Request, response: Response) -> dict[str, bool]:
         revoke_session(token)
     response.delete_cookie(_AUTH_COOKIE, path="/")
     return {"ok": True}
+
+
+@app.get("/auth/status")
+def auth_status(request: Request) -> Response:
+    if ALLOW_INSECURE_LOCALONLY or is_valid_token(_extract_bearer_token(request)):
+        return JSONResponse(status_code=200, content={"authenticated": True})
+    return JSONResponse(status_code=401, content={"authenticated": False})
 
 
 async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
