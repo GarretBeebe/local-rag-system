@@ -135,16 +135,18 @@ def index_file(path: Path) -> IndexDecision:
     ensure_collection()
     normalized_path = normalize_path(path)
 
-    read_started = time.monotonic()
+    elapsed: dict[str, float] = {}
+
+    t0 = time.monotonic()
     text = _read_file(path)
-    read_elapsed = time.monotonic() - read_started
+    elapsed["read"] = time.monotonic() - t0
     if text is None:
         return IndexDecision.SKIPPED
 
-    chunk_started = time.monotonic()
+    t0 = time.monotonic()
     chunks = chunk_document(path, text)
     chunks = [c.strip() for c in chunks if c and c.strip()]
-    chunk_elapsed = time.monotonic() - chunk_started
+    elapsed["chunk"] = time.monotonic() - t0
 
     if not chunks:
         logger.info("No non-empty chunks for %s", path)
@@ -152,27 +154,25 @@ def index_file(path: Path) -> IndexDecision:
 
     document_id = str(uuid.uuid5(uuid.NAMESPACE_URL, normalized_path))
 
-    embed_started = time.monotonic()
+    t0 = time.monotonic()
     try:
         points = _embed_chunks(path, chunks, document_id)
     except Exception as e:
         logger.error("Embedding failed for %s: %s", path, e)
         return IndexDecision.FAILED
-    embed_elapsed = time.monotonic() - embed_started
+    elapsed["embed"] = time.monotonic() - t0
 
     if not points:
         logger.warning("No valid chunks to index for %s", path)
         return IndexDecision.FAILED
 
-    upsert_started = time.monotonic()
+    t0 = time.monotonic()
     result = _upsert_chunks(path, points)
-    upsert_elapsed = time.monotonic() - upsert_started
+    elapsed["upsert"] = time.monotonic() - t0
 
     if result == IndexDecision.INDEXED:
-        logger.info(
-            "Indexed %s: %d chunks — read=%.2fs chunk=%.2fs embed=%.2fs upsert=%.2fs",
-            path, len(points), read_elapsed, chunk_elapsed, embed_elapsed, upsert_elapsed,
-        )
+        timing = " ".join(f"{k}={v:.2f}s" for k, v in elapsed.items())
+        logger.info("Indexed %s: %d chunks — %s", path, len(points), timing)
     return result
 
 

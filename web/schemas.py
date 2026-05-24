@@ -18,8 +18,8 @@ from settings import (
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(max_length=128)
-    password: str = Field(max_length=128)
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class ChatMessage(BaseModel):

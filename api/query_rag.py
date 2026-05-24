@@ -126,13 +126,23 @@ def _prepare_query(
     )
 
 
-def ask(question: str, model: str, rag_mode: RagMode = "augmented") -> str:
+def ask(
+    question: str,
+    model: str,
+    rag_mode: RagMode = "augmented",
+    cancel: threading.Event | None = None,
+) -> str:
+    if cancel and cancel.is_set():
+        return ""
     prepared = _prepare_query(question, rag_mode)
     if isinstance(prepared, _DirectReply):
         return prepared.text
 
+    if cancel and cancel.is_set():
+        return ""
+
     with _timed("generate"):
-        answer = ollama_client.generate(prepared.prompt, model).strip()
+        answer = ollama_client.generate(prepared.prompt, model, cancel=cancel).strip()
 
     return answer + prepared.sources
 

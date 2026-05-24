@@ -218,8 +218,10 @@ async def _run_rag_with_timeout(
     if remaining <= 0:
         semaphore.release()
         raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
+    cancel_event = threading.Event()
     future = _submit_rag_job(
-        asyncio.get_running_loop(), semaphore, ask, question, model, rag_mode
+        asyncio.get_running_loop(), semaphore,
+        lambda: ask(question, model, rag_mode, cancel_event),
     )
     try:
         # shield: timeout cancels the wrapper, not the executor future, so the
@@ -227,12 +229,14 @@ async def _run_rag_with_timeout(
         answer = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
         return answer.strip()
     except TimeoutError:
+        cancel_event.set()
         logger.warning("RAG pipeline timed out after %.1fs", timeout)
         raise HTTPException(
             status_code=504,
             detail="RAG pipeline timed out while generating an answer.",
         ) from None
     except Exception as e:
+        cancel_event.set()
         logger.exception("RAG pipeline error")
         raise HTTPException(status_code=500, detail="RAG pipeline error") from e
 

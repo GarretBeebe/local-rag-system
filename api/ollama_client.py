@@ -41,11 +41,17 @@ def get(path: str, **kwargs: Any) -> requests.Response:
     return _get_session().get(_url(path), **kwargs)
 
 
-def post_with_retry(path: str, **kwargs: Any) -> requests.Response:
+def post_with_retry(
+    path: str,
+    cancel: threading.Event | None = None,
+    **kwargs: Any,
+) -> requests.Response:
     """POST with up to OLLAMA_MAX_RETRIES retries on 5xx responses."""
     url = _url(path)
     last_exc: Exception | None = None
     for attempt in range(OLLAMA_MAX_RETRIES + 1):
+        if cancel and cancel.is_set():
+            raise RuntimeError(f"Ollama request to {path} cancelled")
         try:
             r = _get_session().post(url, **kwargs)
             if r.status_code >= 500 and attempt < OLLAMA_MAX_RETRIES:
@@ -75,10 +81,18 @@ def _generate_payload(model: str, prompt: str, *, stream: bool) -> dict[str, Any
     }
 
 
-def generate(prompt: str, model: str, timeout: float = OLLAMA_GENERATE_TIMEOUT_SECONDS) -> str:
+def generate(
+    prompt: str,
+    model: str,
+    timeout: float = OLLAMA_GENERATE_TIMEOUT_SECONDS,
+    cancel: threading.Event | None = None,
+) -> str:
     """Return a complete generated response from Ollama."""
     r = post_with_retry(
-        "/api/generate", json=_generate_payload(model, prompt, stream=False), timeout=timeout
+        "/api/generate",
+        cancel=cancel,
+        json=_generate_payload(model, prompt, stream=False),
+        timeout=timeout,
     )
     data = r.json()
     if "response" not in data:

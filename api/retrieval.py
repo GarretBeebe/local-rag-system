@@ -127,7 +127,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 def qdrant_recall(
     question_vec: list[float],
     limit: int = RECALL_K,
-    with_vectors: bool = True,
+    with_vectors: bool = False,
     query_filter: Filter | None = None,
 ) -> list[Chunk]:
     """Returns candidate chunks; fetches vectors only when needed for MMR."""

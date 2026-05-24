@@ -19,6 +19,8 @@ from web.user_store import delete_user, init_db, list_users, upsert_user
 
 
 def cmd_add(username: str) -> None:
+    if not username.strip():
+        _exit_with_error("Username cannot be empty.")
     password = getpass.getpass(f"Password for {username!r}: ")
     confirm = getpass.getpass("Confirm password: ")
     if password != confirm:

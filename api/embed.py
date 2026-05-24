@@ -40,7 +40,6 @@ def embed(text: str) -> list[float]:
     try:
         data = response.json()
     except ValueError as e:
-        # .json() failed
         raise RuntimeError(f"Embedding service returned invalid JSON: {e}") from e
 
     if "embedding" not in data:
