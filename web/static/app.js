@@ -144,6 +144,22 @@ const $ = id => document.getElementById(id);
       }
     }
 
+    async function _renderStream(reader, thinking) {
+      let accumulated = '';
+      let assistantDiv = null;
+      for await (const delta of _iterSSEDeltas(reader)) {
+        accumulated += delta;
+        if (!assistantDiv) {
+          thinking.remove();
+          assistantDiv = appendMessage('assistant', marked.parse(accumulated));
+        } else {
+          assistantDiv.innerHTML = DOMPurify.sanitize(marked.parse(accumulated));
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+      return assistantDiv;
+    }
+
     async function sendMessage() {
       const text = inputEl.value.trim();
       if (!text || sendBtn.disabled) return;
@@ -152,6 +168,7 @@ const $ = id => document.getElementById(id);
       _abortCtl = new AbortController();
       _lockUi();
       let wasStopped = false;
+      let assistantDiv = null;
 
       appendMessage('user', text);
       const thinking = document.createElement('div');
@@ -159,9 +176,6 @@ const $ = id => document.getElementById(id);
       thinking.textContent = 'Thinking…';
       messagesEl.appendChild(thinking);
       messagesEl.scrollTop = messagesEl.scrollHeight;
-
-      let accumulated = '';
-      let assistantDiv = null;
 
       try {
         const res = await apiFetch('/v1/chat/completions', {
@@ -176,31 +190,15 @@ const $ = id => document.getElementById(id);
           }),
         });
 
-        if (res.status === 401) {
-          showLogin('Session expired. Please sign in again.');
-          return;
-        }
-
+        if (res.status === 401) { showLogin('Session expired. Please sign in again.'); return; }
         if (!res.ok) {
           const body = await res.text().catch(() => '');
           appendMessage('error', `Server error ${res.status}${body ? ': ' + body : ''}`);
           return;
         }
 
-        for await (const delta of _iterSSEDeltas(res.body.getReader())) {
-          accumulated += delta;
-          if (!assistantDiv) {
-            thinking.remove();
-            assistantDiv = appendMessage('assistant', marked.parse(accumulated));
-          } else {
-            assistantDiv.innerHTML = DOMPurify.sanitize(marked.parse(accumulated));
-            messagesEl.scrollTop = messagesEl.scrollHeight;
-          }
-        }
-
-        if (!assistantDiv) {
-          appendMessage('error', 'No response received.');
-        }
+        assistantDiv = await _renderStream(res.body.getReader(), thinking);
+        if (!assistantDiv) appendMessage('error', 'No response received.');
       } catch (err) {
         if (err.name === 'AbortError') {
           wasStopped = true;

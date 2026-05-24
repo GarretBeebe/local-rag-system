@@ -457,9 +457,8 @@ async def logout(request: Request, response: Response) -> dict[str, bool]:
 
 @app.get("/auth/status")
 def auth_status(request: Request) -> Response:
-    if ALLOW_INSECURE_LOCALONLY or is_valid_token(_extract_bearer_token(request)):
-        return JSONResponse(status_code=200, content={"authenticated": True})
-    return JSONResponse(status_code=200, content={"authenticated": False})
+    authenticated = ALLOW_INSECURE_LOCALONLY or is_valid_token(_extract_bearer_token(request))
+    return JSONResponse(content={"authenticated": authenticated})
 
 
 async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:

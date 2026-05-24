@@ -90,12 +90,7 @@ MAX_CHAT_QUESTION_CHARS = int(os.environ.get("MAX_CHAT_QUESTION_CHARS", "12000")
 MAX_MODEL_NAME_CHARS = int(os.environ.get("MAX_MODEL_NAME_CHARS", "128"))
 
 
-def _require_positive_int(name: str, value: int) -> None:
-    if value <= 0:
-        raise ValueError(f"settings: {name} must be > 0, got {value}")
-
-
-def _require_positive_float(name: str, value: float) -> None:
+def _require_positive(name: str, value: int | float) -> None:
     if value <= 0:
         raise ValueError(f"settings: {name} must be > 0, got {value}")
 
@@ -123,7 +118,7 @@ def _validate_settings() -> None:
         "MAX_CHAT_QUESTION_CHARS": MAX_CHAT_QUESTION_CHARS,
         "MAX_MODEL_NAME_CHARS": MAX_MODEL_NAME_CHARS,
     }.items():
-        _require_positive_int(name, value)
+        _require_positive(name, value)
     for name, value in {
         "RATE_WINDOW_SECONDS": RATE_WINDOW_SECONDS,
         "STREAM_TIMEOUT_SECONDS": STREAM_TIMEOUT_SECONDS,
@@ -135,7 +130,7 @@ def _validate_settings() -> None:
         "WATCHER_POLL_INTERVAL_SECONDS": WATCHER_POLL_INTERVAL_SECONDS,
         "OLLAMA_RETRY_DELAY_SECONDS": OLLAMA_RETRY_DELAY_SECONDS,
     }.items():
-        _require_positive_float(name, value)
+        _require_positive(name, value)
     if OLLAMA_MAX_RETRIES < 0:
         raise ValueError(f"settings: OLLAMA_MAX_RETRIES must be >= 0, got {OLLAMA_MAX_RETRIES}")
     if CHUNK_OVERLAP < 0:
