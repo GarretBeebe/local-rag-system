@@ -69,11 +69,7 @@ def extract_question_from_messages(messages: list[ChatMessage]) -> str:
     if isinstance(content, str):
         question = content
     else:
-        question = " ".join(
-            item.get("text", "")
-            for item in content
-            if isinstance(item, dict)
-        )
+        question = " ".join(item.get("text", "") for item in content if isinstance(item, dict))
 
     question = question.strip()
     if not question:

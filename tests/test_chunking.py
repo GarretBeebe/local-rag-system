@@ -113,6 +113,7 @@ def test_chunk_document_case_insensitive_extension():
 
 # --- Module-level code preservation ---
 
+
 def test_chunk_python_imports_only_are_present():
     code = "import os\nimport sys\n"
     chunks = chunk_python(code)

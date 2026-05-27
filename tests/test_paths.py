@@ -12,6 +12,7 @@ from common.paths import (
 
 # --- normalize_path ---
 
+
 def test_normalize_path_string_input():
     result = normalize_path("/tmp/foo/bar.txt")
     assert result == str(Path("/tmp/foo/bar.txt").resolve())
@@ -27,6 +28,7 @@ def test_normalize_path_returns_string():
 
 
 # --- has_allowed_extension ---
+
 
 def test_has_allowed_extension_match():
     assert has_allowed_extension("doc.md", {".md", ".txt"})
@@ -51,6 +53,7 @@ def test_normalize_extensions_returns_lowercase_frozenset():
 
 # --- matches_ignore_pattern ---
 
+
 def test_matches_ignore_pattern_exact_component():
     assert matches_ignore_pattern("/project/.git/config", [".git"])
 
@@ -72,6 +75,7 @@ def test_matches_ignore_pattern_empty_patterns():
 
 
 # --- is_indexable_path ---
+
 
 def test_is_indexable_path_allowed_and_not_ignored():
     assert is_indexable_path("docs/readme.md", {".md"}, ["__pycache__"])

@@ -31,9 +31,7 @@ def get_index_version() -> int:
     """Return the current document index version."""
     conn = _store.conn
     with conn:
-        row = conn.execute(
-            "SELECT version FROM index_state WHERE name='documents'"
-        ).fetchone()
+        row = conn.execute("SELECT version FROM index_state WHERE name='documents'").fetchone()
     return int(row[0]) if row else 0
 
 
@@ -48,7 +46,5 @@ def bump_index_version() -> int:
             WHERE name='documents'
             """
         )
-        row = conn.execute(
-            "SELECT version FROM index_state WHERE name='documents'"
-        ).fetchone()
+        row = conn.execute("SELECT version FROM index_state WHERE name='documents'").fetchone()
     return int(row[0]) if row else 0

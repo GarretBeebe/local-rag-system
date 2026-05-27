@@ -162,12 +162,10 @@ def mmr_select(
     Only candidates that include a dense vector are considered; keyword-only
     results without vectors should be filtered out by the caller.
     """
+
     def mmr_score(c: Chunk, selected: list[Chunk]) -> float:
         sim_to_query = cosine(question_vec, c.vector)
-        diversity_penalty = (
-            max(cosine(c.vector, s.vector) for s in selected)
-            if selected else 0.0
-        )
+        diversity_penalty = max(cosine(c.vector, s.vector) for s in selected) if selected else 0.0
         return lambda_mult * sim_to_query - (1.0 - lambda_mult) * diversity_penalty
 
     selected = []
@@ -194,7 +192,8 @@ def rerank(question: str, candidates: list[Chunk], top_n: int = FINAL_K) -> list
     if len(scores) != len(candidates):
         logger.warning(
             "rerank: score count (%d) != candidate count (%d), truncating",
-            len(scores), len(candidates),
+            len(scores),
+            len(candidates),
         )
     for c, s in zip(candidates, scores, strict=False):
         c.rerank_score = float(s)
@@ -211,10 +210,12 @@ def hybrid_recall(
     """Combine dense vector recall from Qdrant with BM25 keyword search results."""
     query_filter = (
         Filter(must=[FieldCondition(key="filename", match=MatchValue(value=filename))])
-        if filename else None
+        if filename
+        else None
     )
-    vector_results = qdrant_recall(question_vec, limit=limit,
-                                   with_vectors=MMR_ENABLED, query_filter=query_filter)
+    vector_results = qdrant_recall(
+        question_vec, limit=limit, with_vectors=MMR_ENABLED, query_filter=query_filter
+    )
 
     keyword_results: list[KeywordResult]
     try:

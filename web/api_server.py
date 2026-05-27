@@ -74,6 +74,7 @@ _RAG_CAPACITY_TIMEOUT_DETAIL = "RAG pipeline timed out waiting for capacity."
 # preventing timing-based username enumeration.
 _DUMMY_HASH: bytes = _bcrypt.hashpw(b"__sentinel__", _bcrypt.gensalt())
 
+
 def resolve_client_ip(request: Request) -> str:
     peer = request.client.host if request.client else "unknown"
     if peer in TRUSTED_PROXY_IPS:
@@ -122,8 +123,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if ALLOW_INSECURE_LOCALONLY:
         logger.warning(
-            "Authentication is DISABLED for local-only mode because "
-            "ALLOW_INSECURE_LOCALONLY=true"
+            "Authentication is DISABLED for local-only mode because ALLOW_INSECURE_LOCALONLY=true"
         )
 
     warm_task = asyncio.create_task(_warm_models()) if WARM_MODELS_ON_STARTUP else None
@@ -142,8 +142,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             with suppress(asyncio.CancelledError):
                 await t
         api.retrieval.shutdown()
-        futs = [_get_rag_executor().submit(ollama_client.close_session)
-                for _ in range(RAG_EXECUTOR_WORKERS)]
+        futs = [
+            _get_rag_executor().submit(ollama_client.close_session)
+            for _ in range(RAG_EXECUTOR_WORKERS)
+        ]
         for f in futs:
             with suppress(Exception):
                 f.result(timeout=2)
@@ -228,7 +230,8 @@ async def _run_rag_with_timeout(
         raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
     cancel_event = threading.Event()
     future = _submit_rag_job(
-        asyncio.get_running_loop(), semaphore,
+        asyncio.get_running_loop(),
+        semaphore,
         lambda: ask(question, model, rag_mode, cancel_event),
     )
     try:
@@ -489,13 +492,17 @@ async def _warm_models() -> None:
     logger.info("Warming RAG models...")
     await asyncio.gather(
         _warm_one(
-            "LLM", ollama_client.post, "/api/generate",
+            "LLM",
+            ollama_client.post,
+            "/api/generate",
             json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
             timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS,
         ),
         _warm_one("Embedding model", embed, "warmup"),
         _warm_one(
-            "Reranker", rerank, "warmup",
+            "Reranker",
+            rerank,
+            "warmup",
             [Chunk(id="warmup", payload={"text": "warmup"}, score=1.0)],
         ),
     )

@@ -100,7 +100,6 @@ def _index_if_changed(path: str) -> IndexDecision:
 
 
 class IndexWorker:
-
     def __init__(self) -> None:
         self._queue: Queue[str | None] = Queue()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -129,7 +128,6 @@ class IndexWorker:
 
 
 class WatchHandler(FileSystemEventHandler):
-
     def __init__(
         self,
         config: dict[str, Any],
@@ -171,7 +169,8 @@ class WatchHandler(FileSystemEventHandler):
             logger.warning(
                 "Skipping delete for %s — root %s is empty, likely a broken bind mount. "
                 "Fix the mount and run: docker compose restart watcher",
-                event.src_path, broken_root,
+                event.src_path,
+                broken_root,
             )
             return
         normalized_path = normalize_path(event.src_path)
@@ -218,13 +217,9 @@ def validate_required_mounts(required_mounts: list[dict[str, Any]]) -> list[Path
     for entry in required_mounts:
         root = Path(normalize_path(entry["path"]))
         if not root.exists():
-            raise RuntimeError(
-                f"Required mount {root} does not exist — restart will be attempted"
-            )
+            raise RuntimeError(f"Required mount {root} does not exist — restart will be attempted")
         if entry.get("require_non_empty", False) and not any(root.iterdir()):
-            raise RuntimeError(
-                f"Required mount {root} is empty — restart will be attempted"
-            )
+            raise RuntimeError(f"Required mount {root} is empty — restart will be attempted")
         logger.info("Mount %s OK", root)
         roots.append(root)
     return roots

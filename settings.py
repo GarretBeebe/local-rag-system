@@ -150,8 +150,7 @@ def _validate_settings() -> None:
         )
     if MAX_CHUNK_CHARS < CHUNK_SIZE:
         raise ValueError(
-            f"settings: MAX_CHUNK_CHARS must be >= CHUNK_SIZE, "
-            f"got {MAX_CHUNK_CHARS} < {CHUNK_SIZE}"
+            f"settings: MAX_CHUNK_CHARS must be >= CHUNK_SIZE, got {MAX_CHUNK_CHARS} < {CHUNK_SIZE}"
         )
     if not 0.0 <= MMR_LAMBDA_MULT <= 1.0:
         raise ValueError(

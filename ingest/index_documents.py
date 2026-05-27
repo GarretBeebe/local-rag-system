@@ -131,7 +131,9 @@ def _upsert_chunks(filepath: str, points: list[PointStruct]) -> IndexDecision:
     except Exception as e:
         logger.error(
             "Stale vector cleanup failed for %s — fingerprint not updated, "
-            "will retry on next poll: %s", filepath, e,
+            "will retry on next poll: %s",
+            filepath,
+            e,
         )
         return IndexDecision.FAILED
     return IndexDecision.INDEXED

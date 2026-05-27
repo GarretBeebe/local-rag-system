@@ -10,15 +10,18 @@ from web.auth import create_session, is_valid_token
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def fresh_db(tmp_path, monkeypatch):
     """Reinitialize user_store against a fresh temporary database."""
     from common.sqlite_store import SqliteStore
+
     monkeypatch.setattr(user_store, "_store", SqliteStore(tmp_path / "users.sqlite3"))
     user_store.init_db()
 
 
 # ── user_store session methods ────────────────────────────────────────────────
+
 
 def test_create_session_returns_64_char_hex(fresh_db):
     user_store.upsert_user("alice", "hash")
@@ -117,6 +120,7 @@ def test_purge_expired_sessions_preserves_valid_rows(fresh_db):
 
 # ── is_valid_token: API key path ──────────────────────────────────────────────
 
+
 def test_is_valid_token_correct_api_key(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "my-secret-key")
     assert is_valid_token("my-secret-key") is True
@@ -134,6 +138,7 @@ def test_is_valid_token_empty_with_api_key(monkeypatch):
 
 
 # ── is_valid_token: session path ──────────────────────────────────────────────
+
 
 def test_is_valid_token_valid_session(monkeypatch):
     monkeypatch.setattr(auth_module, "API_KEY", "")
@@ -163,6 +168,7 @@ def test_is_valid_token_empty_token(monkeypatch):
 
 
 # ── create_session ────────────────────────────────────────────────────────────
+
 
 def test_create_session_delegates_username_and_expiry(monkeypatch):
     captured = {}

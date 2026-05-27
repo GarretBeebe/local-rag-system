@@ -24,6 +24,7 @@ pytestmark = pytest.mark.integration
 def _count_points(normalized_path: str) -> int:
     """Count Qdrant points whose filepath payload matches normalized_path."""
     from qdrant_client.models import FieldCondition, Filter, MatchValue
+
     result = get_qdrant_client().count(
         collection_name=COLLECTION,
         count_filter=Filter(
@@ -37,6 +38,7 @@ def _count_points(normalized_path: str) -> int:
 def _point_ids(normalized_path: str) -> set[str]:
     """Return the set of point IDs whose filepath payload matches normalized_path."""
     from qdrant_client.models import FieldCondition, Filter, MatchValue
+
     points, _ = get_qdrant_client().scroll(
         collection_name=COLLECTION,
         scroll_filter=Filter(
@@ -51,6 +53,7 @@ def _point_ids(normalized_path: str) -> set[str]:
 @pytest.fixture(autouse=True)
 def _ensure_collection():
     from ingest.index_documents import ensure_collection
+
     ensure_collection()
 
 
@@ -66,6 +69,7 @@ def tmp_doc(tmp_path: Path, fake_embed) -> Path:
 
 def test_initial_index_produces_chunks(tmp_doc):
     from ingest.index_documents import index_file
+
     outcome = index_file(tmp_doc)
     assert outcome == "indexed"
     assert _count_points(normalize_path(tmp_doc)) >= 1

@@ -29,9 +29,7 @@ from settings import GEN_MODEL
 logger = logging.getLogger(__name__)
 
 _NO_CONTEXT_REPLY = "No relevant context found in the vector store yet."
-_RETRIEVAL_UNAVAILABLE_STRICT = (
-    "Retrieval service is unavailable. Cannot answer in strict mode."
-)
+_RETRIEVAL_UNAVAILABLE_STRICT = "Retrieval service is unavailable. Cannot answer in strict mode."
 _RETRIEVAL_UNAVAILABLE_NOTICE = (
     "\n\n---\n\n*Retrieval unavailable — answer from model knowledge only.*"
 )

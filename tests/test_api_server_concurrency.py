@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 def test_get_rag_executor_before_lifespan_raises_runtime_error():
     import web.api_server as srv
+
     srv._RAG_EXECUTOR = None
     with pytest.raises(RuntimeError, match="lifespan not started"):
         srv._get_rag_executor()
@@ -17,6 +18,7 @@ def test_get_rag_executor_before_lifespan_raises_runtime_error():
 
 def test_get_rag_concurrency_before_lifespan_raises_runtime_error():
     import web.api_server as srv
+
     srv._RAG_CONCURRENCY = None
     with pytest.raises(RuntimeError, match="lifespan not started"):
         srv._get_rag_concurrency()
@@ -84,10 +86,10 @@ def test_run_rag_with_timeout_raises_504_when_budget_exhausted_after_acquire(mon
 
         def monotonic(self):
             self._call_n += 1
-            if self._call_n == 1:   # 'started = time.monotonic()'
+            if self._call_n == 1:  # 'started = time.monotonic()'
                 return 0.0
-            if self._call_n == 2:   # 'time.monotonic()' in remaining calc
-                return 10_000.0     # → remaining = timeout - 10000 ≤ 0
+            if self._call_n == 2:  # 'time.monotonic()' in remaining calc
+                return 10_000.0  # → remaining = timeout - 10000 ≤ 0
             return self._real_mono()
 
         def __getattr__(self, name):
@@ -122,9 +124,9 @@ def test_semaphore_released_via_done_callback_after_generation_timeout(monkeypat
 
         def monotonic(self):
             self._call_n += 1
-            if self._call_n == 1:   # 'started'
+            if self._call_n == 1:  # 'started'
                 return 0.0
-            if self._call_n == 2:   # remaining check → 0.99s elapsed of 1.0s budget
+            if self._call_n == 2:  # remaining check → 0.99s elapsed of 1.0s budget
                 return 0.99
             return self._real_mono()
 
@@ -140,6 +142,7 @@ def test_semaphore_released_via_done_callback_after_generation_timeout(monkeypat
 
         def slow_ask(*args):
             import time as _t
+
             _t.sleep(0.3)
             return "answer"
 

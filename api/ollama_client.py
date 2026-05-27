@@ -69,14 +69,15 @@ def post_with_retry(
             if r.status_code >= 500 and attempt < OLLAMA_MAX_RETRIES:
                 logger.warning(
                     "Ollama returned HTTP %d for %s (attempt %d/%d), retrying",
-                    r.status_code, path, attempt + 1, OLLAMA_MAX_RETRIES + 1,
+                    r.status_code,
+                    path,
+                    attempt + 1,
+                    OLLAMA_MAX_RETRIES + 1,
                 )
                 time.sleep(OLLAMA_RETRY_DELAY_SECONDS)
                 continue
             if not r.ok:
-                raise RuntimeError(
-                    f"Ollama request to {path} failed: HTTP {r.status_code}"
-                )
+                raise RuntimeError(f"Ollama request to {path} failed: HTTP {r.status_code}")
             return r
         except RequestException as e:
             last_exc = e
@@ -88,7 +89,9 @@ def post_with_retry(
 
 def _generate_payload(model: str, prompt: str, *, stream: bool) -> dict[str, Any]:
     return {
-        "model": model, "prompt": prompt, "stream": stream,
+        "model": model,
+        "prompt": prompt,
+        "stream": stream,
         "options": {"num_ctx": OLLAMA_NUM_CTX},
     }
 
@@ -137,9 +140,7 @@ def generate(
     except ValueError as e:
         raise RuntimeError(f"Ollama generate returned invalid JSON: {e}") from e
     if "response" not in data:
-        raise RuntimeError(
-            f"Ollama generate missing 'response' field: {data.get('error', data)}"
-        )
+        raise RuntimeError(f"Ollama generate missing 'response' field: {data.get('error', data)}")
     return data["response"]
 
 
@@ -150,16 +151,17 @@ def stream_generate(
     cancel: threading.Event | None = None,
 ) -> Iterator[str]:
     """Yield text chunks from Ollama's streaming generation API."""
-    with _generation_slot(cancel=cancel, timeout=timeout), _get_session().post(
-        _url("/api/generate"),
-        json=_generate_payload(model, prompt, stream=True),
-        stream=True,
-        timeout=timeout,
-    ) as resp:
+    with (
+        _generation_slot(cancel=cancel, timeout=timeout),
+        _get_session().post(
+            _url("/api/generate"),
+            json=_generate_payload(model, prompt, stream=True),
+            stream=True,
+            timeout=timeout,
+        ) as resp,
+    ):
         if not resp.ok:
-            raise RuntimeError(
-                f"Ollama stream request failed: HTTP {resp.status_code}"
-            )
+            raise RuntimeError(f"Ollama stream request failed: HTTP {resp.status_code}")
         for line in resp.iter_lines(decode_unicode=True):
             if cancel and cancel.is_set():
                 break

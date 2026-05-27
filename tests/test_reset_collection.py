@@ -12,6 +12,7 @@ from common.sqlite_store import SqliteStore
 def isolated_fp_store(monkeypatch, tmp_path):
     """Redirect fingerprint_store to an isolated temp DB for each test."""
     import indexer.fingerprint_store as fs
+
     store = SqliteStore(tmp_path / "test_fingerprints.sqlite3")
     monkeypatch.setattr(fs, "_store", store)
     fs.init_db()
@@ -49,6 +50,7 @@ def test_reset_deletes_collection_and_clears_fingerprints(monkeypatch, mock_qdra
     monkeypatch.setattr(sys, "argv", ["reset_collection"])
 
     from ingest.reset_collection import main
+
     main()
 
     mock_qdrant.delete_collection.assert_called_once()
@@ -62,6 +64,7 @@ def test_vectors_only_skips_fingerprint_clear(monkeypatch, mock_qdrant):
     monkeypatch.setattr(sys, "argv", ["reset_collection", "--vectors-only"])
 
     from ingest.reset_collection import main
+
     main()
 
     mock_qdrant.delete_collection.assert_called_once()
@@ -77,6 +80,7 @@ def test_reset_skips_delete_when_collection_missing(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["reset_collection"])
 
     from ingest.reset_collection import main
+
     main()
 
     client.delete_collection.assert_not_called()

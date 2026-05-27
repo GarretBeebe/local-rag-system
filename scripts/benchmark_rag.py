@@ -60,8 +60,7 @@ def benchmark_query(args: argparse.Namespace) -> None:
     work = [q for _ in range(args.repeat) for q in questions]
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as executor:
         futures = [
-            executor.submit(_post_question, args.base_url, args.model, q, args.token)
-            for q in work
+            executor.submit(_post_question, args.base_url, args.model, q, args.token) for q in work
         ]
         timings = [f.result() for f in concurrent.futures.as_completed(futures)]
 
@@ -75,12 +74,9 @@ def benchmark_query(args: argparse.Namespace) -> None:
 def benchmark_ingest(args: argparse.Namespace) -> None:
     root = Path(args.path)
     allowed = normalize_extensions(ALLOWED_EXTENSIONS)
-    files = [
-        p for p in root.rglob("*")
-        if p.is_file() and has_allowed_extension(p, allowed)
-    ]
+    files = [p for p in root.rglob("*") if p.is_file() and has_allowed_extension(p, allowed)]
     if args.limit:
-        files = files[:args.limit]
+        files = files[: args.limit]
 
     start = time.perf_counter()
     counts: dict[str, int] = {}

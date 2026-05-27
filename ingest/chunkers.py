@@ -52,7 +52,7 @@ def _recursive_split(text: str, separators: list[str]) -> list[str]:
     for i, sep in enumerate(separators):
         if sep == "" or sep in text:
             separator = sep
-            remaining = separators[i + 1:]
+            remaining = separators[i + 1 :]
             break
 
     parts = [s for s in text.split(separator) if s] if separator else list(text)
@@ -84,6 +84,7 @@ def chunk_text(text: str) -> list[str]:
 # Python code chunking
 # -------------------------
 
+
 def chunk_python(text: str) -> list[str]:
     try:
         tree = ast.parse(text)
@@ -95,7 +96,7 @@ def chunk_python(text: str) -> list[str]:
 
     def _span(start: int, end: int) -> str:
         """Return stripped text for 1-based inclusive line range [start, end]."""
-        return "".join(lines[start - 1:end]).strip()
+        return "".join(lines[start - 1 : end]).strip()
 
     def _emit(segment: str, out: list[str]) -> None:
         if segment:
@@ -111,8 +112,7 @@ def chunk_python(text: str) -> list[str]:
 
         # Emit the node itself.
         segment = (
-            ast.get_source_segment(text, node)
-            or "".join(lines[node.lineno - 1:node.end_lineno])
+            ast.get_source_segment(text, node) or "".join(lines[node.lineno - 1 : node.end_lineno])
         ).strip()
         _emit(segment, chunks)
         prev_end = node.end_lineno
@@ -193,6 +193,7 @@ def chunk_markdown(text: str) -> list[str]:
 # -------------------------
 # Dispatcher
 # -------------------------
+
 
 def chunk_document(path: Path, text: str) -> list[str]:
 

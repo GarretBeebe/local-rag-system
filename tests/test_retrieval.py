@@ -14,6 +14,7 @@ def _chunk(id: str, vector: list[float], text: str = "") -> Chunk:
 
 # --- cosine ---
 
+
 def test_cosine_identical_vectors():
     v = [1.0, 0.0, 0.0]
     assert cosine(v, v) == pytest.approx(1.0)
@@ -33,6 +34,7 @@ def test_cosine_zero_vector_returns_zero():
 
 
 # --- mmr_select ---
+
 
 def test_mmr_select_returns_at_most_top_n():
     q = [1.0, 0.0]
@@ -62,7 +64,7 @@ def test_mmr_select_prefers_relevant_and_diverse():
     q = [1.0, 0.0]
     a = _chunk("a", [1.0, 0.0])
     b = _chunk("b", [0.99, 0.01])  # near-duplicate of a
-    c = _chunk("c", [0.0, 1.0])   # orthogonal — diverse
+    c = _chunk("c", [0.0, 1.0])  # orthogonal — diverse
     result = mmr_select(q, [a, b, c], top_n=2, lambda_mult=0.3)
     ids = {r.id for r in result}
     assert "a" in ids
@@ -78,6 +80,7 @@ def test_mmr_select_preserves_chunk_data():
 
 
 # --- _deduplicate ---
+
 
 def test_deduplication_removes_duplicate_ids():
     chunks = [

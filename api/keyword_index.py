@@ -42,7 +42,6 @@ class KeywordResult(TypedDict):
 
 
 class KeywordIndex:
-
     def __init__(self, refresh_interval: int = KEYWORD_REFRESH_INTERVAL):
         self._lock = threading.Lock()
         self._refresh_interval = refresh_interval
@@ -155,12 +154,17 @@ class KeywordIndex:
         if disabled_reason is not None:
             logger.warning(
                 "KeywordIndex disabled: %s; scanned %d docs/%d tokens in %.2fs",
-                disabled_reason, doc_count, token_count, elapsed,
+                disabled_reason,
+                doc_count,
+                token_count,
+                elapsed,
             )
         else:
             logger.info(
                 "KeywordIndex built: %d docs/%d tokens in %.2fs",
-                doc_count, token_count, elapsed,
+                doc_count,
+                token_count,
+                elapsed,
             )
 
     def _replace_index(

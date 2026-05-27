@@ -15,6 +15,7 @@ import pytest
 def require_qdrant():
     """Skip the entire integration suite if Qdrant is not reachable."""
     from common.qdrant import get_qdrant_client
+
     try:
         get_qdrant_client().get_collections()
     except Exception as e:

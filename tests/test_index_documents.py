@@ -29,6 +29,7 @@ def test_embed_failure_returns_failed(tmp_doc, monkeypatch):
     monkeypatch.setattr("ingest.index_documents.get_qdrant_client", lambda: mock_client)
 
     from ingest.index_documents import index_file
+
     result = index_file(tmp_doc)
 
     assert result == IndexDecision.FAILED
@@ -46,6 +47,7 @@ def test_embed_failure_does_not_update_fingerprint(tmp_doc, monkeypatch):
     monkeypatch.setattr("ingest.index_documents.get_qdrant_client", MagicMock)
 
     from ingest.index_documents import index_file
+
     assert index_file(tmp_doc) == IndexDecision.FAILED
 
 

@@ -48,7 +48,8 @@ async def _sweep_expired(buckets: dict[str, list[float]], lock: asyncio.Lock) ->
         async with lock:
             now = time.monotonic()
             dead = [
-                ip for ip, ts in buckets.items()
+                ip
+                for ip, ts in buckets.items()
                 if not any(now - t < RATE_WINDOW_SECONDS for t in ts)
             ]
             for ip in dead:

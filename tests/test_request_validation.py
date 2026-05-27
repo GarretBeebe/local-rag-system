@@ -37,6 +37,7 @@ def _req(messages=None, model="test-model") -> ChatRequest:
 
 # --- LoginRequest ---
 
+
 def test_login_request_valid():
     r = LoginRequest(username="alice", password="secret")
     assert r.username == "alice"
@@ -53,6 +54,7 @@ def test_login_request_password_too_long():
 
 
 # --- ChatRequest field constraints ---
+
 
 def test_chat_request_valid():
     req = _req()
@@ -101,6 +103,7 @@ def test_chat_request_invalid_rag_mode():
 
 # --- _validate_chat_request ---
 
+
 def test_validate_single_message_within_limits():
     _validate_chat_request(_req([_msg("hello")]))
 
@@ -128,6 +131,7 @@ def test_validate_structured_content_too_many_items():
 
 
 # --- _extract_question_from_messages ---
+
 
 def test_extract_question_string_content():
     msgs = [_msg("what is RAG?")]

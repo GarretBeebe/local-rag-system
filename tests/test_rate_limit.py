@@ -25,6 +25,7 @@ def fresh_buckets():
 
 # --- check_rate_limit ---
 
+
 def test_first_request_passes():
     assert asyncio.run(check_rate_limit("1.2.3.4")) is True
 
@@ -73,6 +74,7 @@ def test_window_expiry_allows_new_requests(monkeypatch):
 
 
 # --- check_login_rate_limit ---
+
 
 def test_login_first_attempt_passes():
     assert asyncio.run(check_login_rate_limit("1.2.3.4")) is True

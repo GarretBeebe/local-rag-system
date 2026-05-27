@@ -38,13 +38,10 @@ def _pattern_matches(
         return True
     if fnmatch(path_text, pattern):
         return True
-    return (
-        "/" in normalized_pattern
-        and (
-            fnmatch(normalized_path_text, normalized_pattern)
-            or fnmatch(normalized_path_text, f"*/{normalized_pattern}")
-            or fnmatch(normalized_path_text, f"*/{normalized_pattern}/*")
-        )
+    return "/" in normalized_pattern and (
+        fnmatch(normalized_path_text, normalized_pattern)
+        or fnmatch(normalized_path_text, f"*/{normalized_pattern}")
+        or fnmatch(normalized_path_text, f"*/{normalized_pattern}/*")
     )
 
 

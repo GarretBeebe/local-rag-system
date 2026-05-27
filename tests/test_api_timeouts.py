@@ -89,8 +89,9 @@ def test_generation_capacity_timeout_releases_slot(monkeypatch):
     monkeypatch.setattr(ollama_client, "_generation_slots", threading.BoundedSemaphore(1))
     ollama_client._generation_slots.acquire()
 
-    with pytest.raises(RuntimeError, match="generation capacity"), ollama_client._generation_slot(
-        timeout=0.01
+    with (
+        pytest.raises(RuntimeError, match="generation capacity"),
+        ollama_client._generation_slot(timeout=0.01),
     ):
         pass
 

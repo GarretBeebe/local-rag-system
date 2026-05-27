@@ -153,6 +153,7 @@ def test_index_file_exception_is_logged_and_returns_failed(
 
 # --- _iter_schedulable_dirs ---
 
+
 def test_iter_schedulable_dirs_no_exclusions_yields_all(tmp_path: Path) -> None:
     """With no exclude_dirs, all directories including nested ones are yielded."""
     (tmp_path / "a" / "b").mkdir(parents=True)
