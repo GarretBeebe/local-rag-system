@@ -205,7 +205,12 @@ config already watches `/watch/Nextcloud` and `/watch/Code` — the
 container-side names for the paths set in step 1.
 
 You only need to edit this file to change which subdirectories are
-indexed or to add exclusions:
+indexed or to add exclusions. After editing, rebuild the container to
+apply the change:
+
+    docker compose up -d --build rag-watcher
+
+Example config:
 
     watch_paths:
       - path: /watch/Code
@@ -679,9 +684,9 @@ Examples:
 
 ## Adding New Index Sources
 
-Modify
+Modify `config/watcher_config.container.yaml`, then rebuild the container:
 
-    config/watcher_config.container.yaml
+    docker compose up -d --build rag-watcher
 
 Example:
 

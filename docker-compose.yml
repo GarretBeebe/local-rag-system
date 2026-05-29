@@ -118,7 +118,6 @@ services:
     volumes:
       - rag-data:/app/data
       - hf-cache:/app/.cache/huggingface
-      - ./config/watcher_config.container.yaml:/app/config/watcher_config.container.yaml:ro
       # Mount your document directories here. See note at top of file.
       - ${NEXTCLOUD_PATH}:/watch/Nextcloud:ro
       - ${CODE_PATH}:/watch/Code:ro
