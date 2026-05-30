@@ -193,6 +193,7 @@ When `API_KEY` is set, all endpoints except `/healthz` require:
 
 **Optional**
 
+    API_PORT=8001                            # remap the host port (default: 8000)
     CORS_ORIGINS=https://chat.example.com    # cross-origin browser access
     TRUSTED_PROXY_IPS=192.168.1.1            # real client IP behind a reverse proxy
     SESSION_EXPIRY_HOURS=8                   # web UI session lifetime (default: 8 h)

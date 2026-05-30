@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
     command: uvicorn web.api_server:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       qdrant:
         condition: service_started
