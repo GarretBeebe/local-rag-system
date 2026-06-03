@@ -15,6 +15,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 from common.config import load_yaml_config
 from common.index_state import bump_index_version
@@ -31,7 +32,7 @@ class NoAccessibleWatchRootsError(RuntimeError):
     pass
 
 
-def _iter_accessible_roots(config: dict) -> list[Path]:
+def _iter_accessible_roots(config: dict[str, Any]) -> list[Path]:
     roots = []
     for entry in config.get("watch_paths", []):
         root = Path(entry["path"]).expanduser()
@@ -42,7 +43,7 @@ def _iter_accessible_roots(config: dict) -> list[Path]:
     return roots
 
 
-def find_ignored_paths(config: dict) -> list[str]:
+def find_ignored_paths(config: dict[str, Any]) -> list[str]:
     allowed_ext = normalize_extensions(config.get("allowed_extensions", ALLOWED_EXTENSIONS))
     ignore_patterns = config.get("ignore_patterns", [])
     watch_paths = config.get("watch_paths", [])

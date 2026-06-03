@@ -225,7 +225,9 @@ def validate_required_mounts(required_mounts: list[dict[str, Any]]) -> list[Path
     return roots
 
 
-def initial_scan(watch_path_pairs: list[tuple[dict, Path]], handler: WatchHandler) -> None:
+def initial_scan(
+    watch_path_pairs: list[tuple[dict[str, Any], Path]], handler: WatchHandler
+) -> None:
     logger.info("Starting initial scan")
     for entry, root in watch_path_pairs:
         exclude_dirs = entry.get("exclude_dirs", [])

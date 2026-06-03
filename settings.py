@@ -11,6 +11,9 @@ Path resolution lives here so no other module needs __file__ manipulation:
 
 import os
 from pathlib import Path
+from typing import cast
+
+from common.types import RagMode
 
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -28,7 +31,7 @@ VECTOR_SIZE = int(os.environ.get("VECTOR_SIZE", "768"))
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # "strict"    — answer only from retrieved context; refuse if nothing found
 # "augmented" — use context when found, fall back to model knowledge otherwise
-RAG_MODE = os.environ.get("RAG_MODE", "augmented")
+RAG_MODE: RagMode = cast(RagMode, os.environ.get("RAG_MODE", "augmented"))
 MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 API_KEY = os.environ.get("API_KEY", "")

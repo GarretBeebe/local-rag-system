@@ -227,21 +227,13 @@ async def _run_rag_with_timeout(
     timeout: float = RAG_REQUEST_TIMEOUT_SECONDS,
 ) -> str:
     """Execute the RAG pipeline with a timeout and bounded in-flight work."""
-    started = time.monotonic()
-    semaphore = await _acquire_rag_capacity(timeout)
-    remaining = timeout - (time.monotonic() - started)
-    if remaining <= 0:
-        semaphore.release()
-        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
     cancel_event = threading.Event()
-    future = _submit_rag_job(
-        asyncio.get_running_loop(),
-        semaphore,
-        lambda: ask(question, model, rag_mode, cancel_event),
+    # shield: timeout cancels the wrapper, not the executor future, so the
+    # done callback releases capacity only when ask() truly exits.
+    future, remaining = await _acquire_and_submit(
+        lambda: ask(question, model, rag_mode, cancel_event), timeout
     )
     try:
-        # shield: timeout cancels the wrapper, not the executor future, so the
-        # done callback releases capacity only when ask() truly exits.
         answer = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
         return answer.strip()
     except TimeoutError:
@@ -287,6 +279,24 @@ def _submit_rag_job(
         raise
     future.add_done_callback(lambda _f: semaphore.release())
     return future
+
+
+async def _acquire_and_submit(
+    fn: Callable[[], Any],
+    timeout: float = RAG_REQUEST_TIMEOUT_SECONDS,
+) -> tuple[asyncio.Future[Any], float]:
+    """Acquire the RAG semaphore, compute remaining time, and submit fn to the executor.
+
+    Returns (future, remaining_seconds). Raises HTTPException(504) if capacity is
+    unavailable or the budget is already exhausted after acquisition.
+    """
+    started = time.monotonic()
+    semaphore = await _acquire_rag_capacity(timeout)
+    remaining = timeout - (time.monotonic() - started)
+    if remaining <= 0:
+        semaphore.release()
+        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL)
+    return _submit_rag_job(asyncio.get_running_loop(), semaphore, fn), remaining
 
 
 async def _start_stream_worker(
@@ -412,18 +422,10 @@ def _check_internal_token(request: Request) -> None:
 
 
 @app.post("/v1/retrieve")
-async def retrieve(request: Request, req: RetrieveRequest) -> dict:
+async def retrieve(request: Request, req: RetrieveRequest) -> dict[str, Any]:
     _check_internal_token(request)
-    started = time.monotonic()
-    semaphore = await _acquire_rag_capacity(RAG_REQUEST_TIMEOUT_SECONDS)
-    remaining = RAG_REQUEST_TIMEOUT_SECONDS - (time.monotonic() - started)
-    if remaining <= 0:
-        semaphore.release()
-        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL)
-    future = _submit_rag_job(
-        asyncio.get_running_loop(),
-        semaphore,
-        lambda: retrieve_best(req.query, final_k=req.limit),
+    future, remaining = await _acquire_and_submit(
+        lambda: retrieve_best(req.query, final_k=req.limit)
     )
     try:
         chunks = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
