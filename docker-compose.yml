@@ -85,6 +85,7 @@ services:
       KEYWORD_MIN_QUERY_TOKENS: ${KEYWORD_MIN_QUERY_TOKENS:-1}
       KEYWORD_MAX_QUERY_TOKENS: ${KEYWORD_MAX_QUERY_TOKENS:-32}
       WARM_MODELS_ON_STARTUP: ${WARM_MODELS_ON_STARTUP:-false}
+      RAG_INTERNAL_TOKEN: ${RAG_INTERNAL_TOKEN:-}
     volumes:
       - rag-data:/app/data
       - hf-cache:/app/.cache/huggingface
