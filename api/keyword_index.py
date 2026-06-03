@@ -48,7 +48,7 @@ class KeywordIndex:
         self._docs: list[list[str]] = []
         self._ids: list[str | int] = []
         self._bm25: BM25Okapi | None = None
-        self.known_filenames: set[str] = set()
+        self._known_filenames: set[str] = set()
         self.doc_count = 0
         self.token_count = 0
         self.last_build_seconds = 0.0
@@ -80,6 +80,11 @@ class KeywordIndex:
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
+
+    @property
+    def known_filenames(self) -> set[str]:
+        with self._lock:
+            return self._known_filenames
 
     def _build(self) -> None:
         t0 = time.monotonic()
@@ -180,7 +185,7 @@ class KeywordIndex:
     ) -> None:
         with self._lock:
             self._docs, self._ids, self._bm25 = docs, ids, bm25
-            self.known_filenames = filenames
+            self._known_filenames = filenames
             self.doc_count = len(docs) if doc_count is None else doc_count
             self.token_count = sum(len(doc) for doc in docs) if token_count is None else token_count
             self.last_build_seconds = 0.0 if elapsed is None else elapsed

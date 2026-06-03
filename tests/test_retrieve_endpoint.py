@@ -16,7 +16,8 @@ _CHUNK = Chunk(
 _AUTH = {"Authorization": f"Bearer {_TOKEN}"}
 
 
-def test_retrieve_no_token_configured():
+def test_retrieve_no_token_configured(monkeypatch):
+    monkeypatch.setattr(srv, "RAG_INTERNAL_TOKEN", None)
     with TestClient(srv.app) as c:
         resp = c.post("/v1/retrieve", json={"query": "hello"}, headers=_AUTH)
     assert resp.status_code == 503

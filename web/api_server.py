@@ -174,8 +174,6 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]) -
         return await call_next(request)
     if request.url.path == "/healthz":
         return await call_next(request)
-    if request.url.path == "/v1/retrieve":
-        return await call_next(request)
 
     client_ip = resolve_client_ip(request)
     if request.url.path == "/auth/login":
@@ -189,6 +187,8 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]) -
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
     if request.url.path == "/auth/status":
+        return await call_next(request)
+    if request.url.path == "/v1/retrieve":
         return await call_next(request)
 
     if not ALLOW_INSECURE_LOCALONLY and not is_valid_token(_extract_bearer_token(request)):
@@ -412,15 +412,33 @@ def _check_internal_token(request: Request) -> None:
 
 
 @app.post("/v1/retrieve")
-def retrieve(request: Request, req: RetrieveRequest) -> dict:
+async def retrieve(request: Request, req: RetrieveRequest) -> dict:
     _check_internal_token(request)
-    chunks = retrieve_best(req.query, final_k=req.limit)
+    started = time.monotonic()
+    semaphore = await _acquire_rag_capacity(RAG_REQUEST_TIMEOUT_SECONDS)
+    remaining = RAG_REQUEST_TIMEOUT_SECONDS - (time.monotonic() - started)
+    if remaining <= 0:
+        semaphore.release()
+        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL)
+    future = _submit_rag_job(
+        asyncio.get_running_loop(),
+        semaphore,
+        lambda: retrieve_best(req.query, final_k=req.limit),
+    )
+    try:
+        chunks = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
+    except TimeoutError:
+        logger.warning("RAG retrieve timed out after %.1fs", RAG_REQUEST_TIMEOUT_SECONDS)
+        raise HTTPException(status_code=504, detail="RAG pipeline timed out") from None
+    except Exception as e:
+        logger.exception("RAG retrieve error")
+        raise HTTPException(status_code=500, detail="RAG pipeline error") from e
     return {
         "chunks": [
             {
                 "text": c.payload.get("text", ""),
                 "filepath": c.payload.get("filepath", ""),
-                "score": c.rerank_score or c.score,
+                "score": c.rerank_score if c.rerank_score is not None else c.score,
             }
             for c in chunks
         ]

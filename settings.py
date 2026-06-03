@@ -47,7 +47,7 @@ ALLOWED_EXTENSIONS = {
     ".ts", ".tsx", ".js", ".jsx",
 }
 
-RAG_INTERNAL_TOKEN: str | None = os.environ.get("RAG_INTERNAL_TOKEN") or None
+RAG_INTERNAL_TOKEN: str | None = (os.environ.get("RAG_INTERNAL_TOKEN") or "").strip() or None
 
 MAX_FILE_SIZE = 1_000_000
 MAX_EMBED_CHARS = 6000
