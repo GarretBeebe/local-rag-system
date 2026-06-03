@@ -256,20 +256,12 @@ async def _wait_for_capacity(timeout: float) -> asyncio.Semaphore:
     return semaphore
 
 
-async def _acquire_rag_capacity(timeout: float) -> asyncio.Semaphore:
-    try:
-        return await _wait_for_capacity(timeout)
-    except TimeoutError:
-        logger.warning("RAG pipeline timed out waiting for capacity after %.1fs", timeout)
-        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
-
-
 def _submit_rag_job(
-    loop: asyncio.AbstractEventLoop,
     semaphore: asyncio.Semaphore,
     fn: Callable[..., Any],
     *args: Any,
 ) -> asyncio.Future[Any]:
+    loop = asyncio.get_running_loop()
     try:
         future = loop.run_in_executor(_get_rag_executor(), fn, *args)
     except BaseException:
@@ -291,24 +283,33 @@ async def _acquire_and_submit(
     unavailable or the budget is already exhausted after acquisition.
     """
     started = time.monotonic()
-    semaphore = await _acquire_rag_capacity(timeout)
+    try:
+        semaphore = await _wait_for_capacity(timeout)
+    except TimeoutError:
+        logger.warning("RAG pipeline timed out waiting for capacity after %.1fs", timeout)
+        raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL) from None
     remaining = timeout - (time.monotonic() - started)
     if remaining <= 0:
         semaphore.release()
         raise HTTPException(status_code=504, detail=_RAG_CAPACITY_TIMEOUT_DETAIL)
-    return _submit_rag_job(asyncio.get_running_loop(), semaphore, fn), remaining
+    return _submit_rag_job(semaphore, fn), remaining
 
 
 async def _start_stream_worker(
     question: str,
     model: str,
     rag_mode: RagMode,
-    loop: asyncio.AbstractEventLoop,
 ) -> tuple[asyncio.Queue[str | Exception | None], threading.Event, asyncio.Future[Any]]:
     """Acquire the semaphore, schedule the stream worker, and return (queue, cancel_event, future).
 
-    Raises TimeoutError if the semaphore cannot be acquired within RAG_REQUEST_TIMEOUT_SECONDS.
+    Raises TimeoutError if the semaphore cannot be acquired within RAG_REQUEST_TIMEOUT_SECONDS,
+    or if the remaining budget is exhausted after acquisition.
+
+    Intentionally raises TimeoutError rather than HTTPException: _rag_stream_response catches
+    TimeoutError to emit an SSE capacity-error chunk, since HTTP headers are already committed
+    by the time this runs inside a StreamingResponse generator.
     """
+    loop = asyncio.get_running_loop()
     queue: asyncio.Queue[str | Exception | None] = asyncio.Queue(maxsize=32)
     cancel_event = threading.Event()
 
@@ -322,14 +323,25 @@ async def _start_stream_worker(
                     coro.close()  # loop closed; prevent "coroutine never awaited" warning
                     return
         except Exception as exc:
-            with suppress(RuntimeError):
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            coro = queue.put(exc)
+            try:
+                asyncio.run_coroutine_threadsafe(coro, loop).result()
+            except RuntimeError:
+                coro.close()
         finally:
-            with suppress(RuntimeError):
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+            coro = queue.put(None)
+            try:
+                asyncio.run_coroutine_threadsafe(coro, loop).result()
+            except RuntimeError:
+                coro.close()
 
+    started = time.monotonic()
     semaphore = await _wait_for_capacity(RAG_REQUEST_TIMEOUT_SECONDS)
-    future = _submit_rag_job(loop, semaphore, _run)
+    remaining = RAG_REQUEST_TIMEOUT_SECONDS - (time.monotonic() - started)
+    if remaining <= 0:
+        semaphore.release()
+        raise TimeoutError
+    future = _submit_rag_job(semaphore, _run)
     return queue, cancel_event, future
 
 
@@ -378,12 +390,11 @@ async def _rag_stream_response(
     http_request: Request | None = None,
 ) -> AsyncIterator[str]:
     """Bridge ask_stream_sync (sync generator) to an async SSE generator."""
-    loop = asyncio.get_running_loop()
     request_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 
     try:
-        queue, cancel_event, _ = await _start_stream_worker(question, model, rag_mode, loop)
+        queue, cancel_event, _ = await _start_stream_worker(question, model, rag_mode)
     except TimeoutError:
         logger.warning("RAG stream timed out waiting for capacity")
         yield make_stream_chunk(
@@ -425,12 +436,13 @@ def _check_internal_token(request: Request) -> None:
 async def retrieve(request: Request, req: RetrieveRequest) -> dict[str, Any]:
     _check_internal_token(request)
     future, remaining = await _acquire_and_submit(
-        lambda: retrieve_best(req.query, final_k=req.limit)
+        lambda: retrieve_best(req.query, final_k=req.limit),
+        RAG_REQUEST_TIMEOUT_SECONDS,
     )
     try:
         chunks = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
     except TimeoutError:
-        logger.warning("RAG retrieve timed out after %.1fs", RAG_REQUEST_TIMEOUT_SECONDS)
+        logger.warning("RAG retrieve timed out after %.1fs", remaining)
         raise HTTPException(status_code=504, detail="RAG pipeline timed out") from None
     except Exception as e:
         logger.exception("RAG retrieve error")
