@@ -407,7 +407,7 @@ def _check_internal_token(request: Request) -> None:
     if RAG_INTERNAL_TOKEN is None:
         raise HTTPException(status_code=503, detail="Retrieve endpoint not configured")
     token = _extract_bearer_token(request)
-    if not token or not secrets.compare_digest(token, RAG_INTERNAL_TOKEN):
+    if not secrets.compare_digest(token, RAG_INTERNAL_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
