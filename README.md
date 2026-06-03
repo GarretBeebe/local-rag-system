@@ -244,6 +244,8 @@ Any model available in Ollama can be selected per-request.
 Builds one shared `rag-system:latest` image and starts three containers:
 `rag-qdrant`, `rag-api`, and `rag-watcher`.
 
+**If using code-assistant integration:** after both stacks are up, manually connect the containers to a shared network so the proxy can reach `rag-api` by name. See [code-assistant README](https://github.com/GarretBeebe/local-code-assistant#rag-context-injection-v4) for the exact commands. This is a manual opt-in step — neither compose file requires the network.
+
 ## 5. Add a web UI user
 
     docker exec -it rag-api python manage_users.py add <username>
