@@ -42,7 +42,12 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 GEN_MODEL = os.environ.get("GEN_MODEL", "qwen2.5:14b")
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-ALLOWED_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml"}
+ALLOWED_EXTENSIONS = {
+    ".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml",
+    ".ts", ".tsx", ".js", ".jsx",
+}
+
+RAG_INTERNAL_TOKEN: str | None = os.environ.get("RAG_INTERNAL_TOKEN") or None
 
 MAX_FILE_SIZE = 1_000_000
 MAX_EMBED_CHARS = 6000

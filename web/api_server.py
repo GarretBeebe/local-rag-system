@@ -15,6 +15,7 @@ Run with:
 import asyncio
 import ipaddress
 import logging
+import secrets
 import threading
 import time
 import uuid
@@ -34,7 +35,7 @@ import api.ollama_client as ollama_client
 import api.retrieval
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
-from api.retrieval import Chunk, rerank
+from api.retrieval import Chunk, rerank, retrieve_best
 from common.types import RagMode
 from settings import (
     ALLOW_INSECURE_LOCALONLY,
@@ -44,6 +45,7 @@ from settings import (
     OLLAMA_WARMUP_TIMEOUT_SECONDS,
     RAG_CONCURRENCY_LIMIT,
     RAG_EXECUTOR_WORKERS,
+    RAG_INTERNAL_TOKEN,
     RAG_REQUEST_TIMEOUT_SECONDS,
     SESSION_EXPIRY_HOURS,
     STREAM_TIMEOUT_SECONDS,
@@ -57,6 +59,7 @@ from web.rate_limit import check_login_rate_limit, check_rate_limit, start_sweep
 from web.schemas import (
     ChatRequest,
     LoginRequest,
+    RetrieveRequest,
     extract_question_from_messages,
     resolve_rag_mode,
     validate_chat_request,
@@ -170,6 +173,8 @@ async def security_middleware(request: Request, call_next: Callable[..., Any]) -
     if request.url.path == "/favicon.ico" or request.url.path.startswith("/ui"):
         return await call_next(request)
     if request.url.path == "/healthz":
+        return await call_next(request)
+    if request.url.path == "/v1/retrieve":
         return await call_next(request)
 
     client_ip = resolve_client_ip(request)
@@ -396,6 +401,30 @@ async def _rag_stream_response(
 
     yield make_stream_chunk(request_id, created, model, finish_reason="stop")
     yield "data: [DONE]\n\n"
+
+
+def _check_internal_token(request: Request) -> None:
+    if RAG_INTERNAL_TOKEN is None:
+        raise HTTPException(status_code=503, detail="Retrieve endpoint not configured")
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not token or not secrets.compare_digest(token, RAG_INTERNAL_TOKEN):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.post("/v1/retrieve")
+def retrieve(request: Request, req: RetrieveRequest) -> dict:
+    _check_internal_token(request)
+    chunks = retrieve_best(req.query, final_k=req.limit)
+    return {
+        "chunks": [
+            {
+                "text": c.payload.get("text", ""),
+                "filepath": c.payload.get("filepath", ""),
+                "score": c.rerank_score or c.score,
+            }
+            for c in chunks
+        ]
+    }
 
 
 @app.get("/v1/models")

@@ -198,6 +198,8 @@ When `API_KEY` is set, all endpoints except `/healthz` require:
     TRUSTED_PROXY_IPS=192.168.1.1            # real client IP behind a reverse proxy
     SESSION_EXPIRY_HOURS=8                   # web UI session lifetime (default: 8 h)
     RAG_MODE=augmented                       # default query mode: strict or augmented
+    RAG_INTERNAL_TOKEN=<shared secret>       # enables POST /v1/retrieve for code-assistant integration
+                                             # generate: python -c "import secrets; print(secrets.token_hex(32))"
 
 ## 2. Configure watch paths
 
@@ -463,6 +465,7 @@ Endpoints
 | `GET` | `/models` | Alias for `/v1/models` |
 | `POST` | `/v1/chat/completions` | RAG-backed chat completion (supports `"stream": true`) |
 | `POST` | `/chat/completions` | Alias for `/v1/chat/completions` |
+| `POST` | `/v1/retrieve` | Machine-to-machine retrieval endpoint — returns top-k code chunks for a query (requires `RAG_INTERNAL_TOKEN`; disabled if unset) |
 
 ------------------------------------------------------------------------
 
@@ -719,6 +722,7 @@ Runtime controls:
 | CORS | Configurable via `CORS_ORIGINS` in `.env` (comma-separated origins). Empty by default, which disables cross-origin browser access. |
 | Qdrant isolation | Qdrant is not bound to any host port — only reachable within the Docker network. `QDRANT_API_KEY` is required so other containers on that network cannot access it unauthenticated. |
 | Read-only mounts | Watcher volume mounts use `:ro` — the container cannot write to your document directories. |
+| Machine-to-machine auth | `POST /v1/retrieve` is for server-to-server use (e.g. code-assistant). It bypasses session/cookie auth and uses a dedicated `RAG_INTERNAL_TOKEN` bearer secret checked with `secrets.compare_digest`. The endpoint is disabled (503) if `RAG_INTERNAL_TOKEN` is unset. |
 
 ------------------------------------------------------------------------
 

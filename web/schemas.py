@@ -22,6 +22,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class RetrieveRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    limit: int = Field(default=3, ge=1, le=10)
+
+
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system", "tool"]
     content: str | list[dict[str, str]]
