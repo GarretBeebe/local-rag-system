@@ -406,7 +406,7 @@ async def _rag_stream_response(
 def _check_internal_token(request: Request) -> None:
     if RAG_INTERNAL_TOKEN is None:
         raise HTTPException(status_code=503, detail="Retrieve endpoint not configured")
-    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    token = _extract_bearer_token(request)
     if not token or not secrets.compare_digest(token, RAG_INTERNAL_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
