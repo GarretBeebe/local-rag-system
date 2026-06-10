@@ -45,7 +45,6 @@ Why this matters:
 
 Where:
 - [settings.py](/path/to/Code/rag-system/settings.py:36) defaults `API_KEY` to empty
-- [settings.py](/path/to/Code/rag-system/settings.py:37) defaults `JWT_SECRET` to empty
 - [settings.py](/path/to/Code/rag-system/settings.py:39) defaults `CORS_ORIGINS` to `*`
 - [web/api_server.py](/path/to/Code/rag-system/web/api_server.py:86) only logs a warning when auth is disabled
 - [.env.example](/path/to/Code/rag-system/.env.example:15) and [.env.example](/path/to/Code/rag-system/.env.example:20) preserve the same insecure defaults

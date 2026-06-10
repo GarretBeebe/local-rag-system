@@ -11,18 +11,16 @@ Issues identified in the May 2026 security review that were not addressed in
 
 **File:** `.env`
 
-**Issue:** Production `API_KEY` and `JWT_SECRET` are stored as plaintext in `.env` on
+**Issue:** Production `API_KEY` is stored as plaintext in `.env` on
 the working directory. If this directory is ever synced (Nextcloud), accidentally staged,
-or the machine is compromised, both secrets are exposed. There is no documented rotation
-runbook, and rotating either secret requires a manual container restart.
+or the machine is compromised, the secret is exposed. There is no documented rotation
+runbook, and rotating it requires a manual container restart.
 
 **Plan:**
 1. Add `.env` to a gitignore audit — verify it is never committed or synced.
 2. Write a rotation runbook in the README:
    - `API_KEY`: generate new value, update `.env`, `docker compose up -d api` — existing
      machine clients must update their key.
-   - `JWT_SECRET`: generate new value, update `.env`, restart — all active JWTs are
-     immediately invalidated (users re-login on next request).
 3. Consider moving secrets to Docker secrets or a secrets manager if the deployment
    grows beyond a single machine.
 
@@ -205,7 +203,7 @@ on the same Docker network can query or modify the vector database without authe
 
 **File:** `settings.py`
 
-**Issue:** Secrets (`API_KEY`, `JWT_SECRET`) are loaded with `os.environ.get()`.
+**Issue:** Secrets (`API_KEY`) are loaded with `os.environ.get()`.
 If any code accidentally logs the settings module or its attributes, secrets appear
 in plain text.
 
@@ -215,7 +213,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     api_key: SecretStr = ""
-    jwt_secret: SecretStr = ""
     ...
 ```
 `SecretStr` values display as `**********` in `repr()` and logs.
