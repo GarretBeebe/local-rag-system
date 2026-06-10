@@ -584,11 +584,13 @@ support across all GPU families including iGPUs.
 1.  Install the [AMD HIP SDK for Windows](https://www.amd.com/en/developer/rocm-hub/hip-sdk.html)
     (required even for the Vulkan path — Ollama's discovery process uses it)
 
-2.  Set `OLLAMA_VULKAN=1` as a persistent Windows environment variable:
+2.  Set `OLLAMA_VULKAN=1` and `OLLAMA_IGPU_ENABLE=1` as persistent Windows
+    environment variables:
 
     ```powershell
     # In PowerShell (no admin required)
     [System.Environment]::SetEnvironmentVariable("OLLAMA_VULKAN", "1", "User")
+    [System.Environment]::SetEnvironmentVariable("OLLAMA_IGPU_ENABLE", "1", "User")
     ```
 
 3.  Fully quit and restart Ollama (right-click tray icon → Quit, then relaunch)
@@ -619,6 +621,21 @@ available system memory shared with the GPU is visible to Ollama.
     unnecessary.
 -   Other GPU vendors (NVIDIA, Intel Arc) have their own acceleration
     paths and do not need `OLLAMA_VULKAN=1`.
+-   **As of Ollama 0.30.7**, a separate scheduler safety gate drops
+    integrated GPUs from the usable-device list even when Vulkan
+    discovery finds them. `OLLAMA_DEBUG=2` will show
+    `"dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1"`
+    immediately before falling back to CPU. `OLLAMA_VULKAN=1` is still
+    required (it's what makes Vulkan discovery run at all) — it's just
+    no longer sufficient on its own. Set both variables.
+-   Reinstalling the AMD HIP SDK does not affect this — ROCm correctly
+    fails for these iGPUs (`hipGetDeviceCount failed: 100`) and falls
+    through to Vulkan as designed; it's not the cause if GPU offload
+    stops working after an update.
+-   `[System.Environment]::SetEnvironmentVariable(..., "User")` only
+    writes the registry — already-running Ollama processes/shells won't
+    pick up new values until restarted (new login, new terminal, or
+    fully quitting and relaunching Ollama).
 
 ------------------------------------------------------------------------
 
