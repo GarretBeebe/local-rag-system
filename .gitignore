@@ -36,7 +36,7 @@ documents/
 !.env.example
 
 # Claude Code local settings (machine-specific overrides)
-.claude/settings.local.json
+**/.claude/settings.local.json
 
 # IDE
 .vscode/
