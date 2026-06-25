@@ -7,25 +7,7 @@ required_mounts:
 
 watch_paths:
 
-  - path: "/watch/Nextcloud/AI-ML"
-    recursive: true
-
-  - path: "/watch/Nextcloud/My Computer Setup"
-    recursive: true
-
-  - path: "/watch/Nextcloud/OpenAI Projects Context"
-    recursive: true
-
-  - path: "/watch/Nextcloud/Resumes"
-    recursive: true
-
-  - path: "/watch/Nextcloud/Scripts"
-    recursive: true
-
-  - path: "/watch/Nextcloud/Software Engineering"
-    recursive: true
-
-  - path: "/watch/Nextcloud/Splunk"
+  - path: "/watch/Nextcloud"
     recursive: true
 
   - path: "/watch/Code"

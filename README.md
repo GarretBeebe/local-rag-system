@@ -175,13 +175,17 @@ Open `.env` and fill in the values below.
 
 **Required — your document directories**
 
-    # Windows (WSL2 path)
-    NEXTCLOUD_PATH=/mnt/c/Users/YourName/Nextcloud
-    CODE_PATH=/mnt/c/Users/YourName/Code
-
     # Linux / macOS
     NEXTCLOUD_PATH=/home/yourname/Nextcloud
     CODE_PATH=/home/yourname/Code
+
+    # Windows (Git Bash)
+    NEXTCLOUD_PATH=/c/Users/YourName/Nextcloud
+    CODE_PATH=/c/Users/YourName/Code
+
+    # Windows (PowerShell / cmd)
+    NEXTCLOUD_PATH=C:/Users/YourName/Nextcloud
+    CODE_PATH=C:/Users/YourName/Code
 
 **Recommended if the API is reachable beyond localhost**
 
@@ -393,8 +397,9 @@ To delete vectors only and leave fingerprints intact:
 
 The watcher uses `watchdog`'s `PollingObserver`, which polls the filesystem on a
 configurable interval (default 30 seconds, set via `WATCHER_POLL_INTERVAL_SECONDS`).
-This ensures reliable detection of new and modified files on all platforms, including
-WSL2-mounted Windows paths (`/mnt/c/...`) where kernel inotify events are not delivered.
+Polling is used because bind-mounted host directories inside Docker containers do not
+reliably deliver kernel filesystem events (inotify, FSEvents) across the container
+boundary on any platform — polling works consistently on Linux, macOS, and Windows.
 
 The watcher reads `config/watcher_config.container.yaml`, set via the
 `CONFIG_PATH` environment variable in `docker-compose.yml`. Paths use the

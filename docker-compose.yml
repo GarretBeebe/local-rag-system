@@ -14,10 +14,11 @@
 #   - path: /watch/Nextcloud
 #   - path: /watch/Code
 #
-# Set NEXTCLOUD_PATH and CODE_PATH in .env.
-# When running from WSL2, use WSL2 paths (even on Windows):
-#   NEXTCLOUD_PATH=/mnt/c/Users/YourName/Nextcloud
-#   CODE_PATH=/mnt/c/Users/YourName/Code
+# Set NEXTCLOUD_PATH and CODE_PATH in .env to the absolute host paths you want
+# to watch. Use the format native to your shell:
+#   Linux / macOS:          /home/yourname/Nextcloud
+#   Windows (Git Bash):     /c/Users/YourName/Nextcloud
+#   Windows (PowerShell):   C:/Users/YourName/Nextcloud
 # ---------------------------------------------------------------------------
 
 services:
