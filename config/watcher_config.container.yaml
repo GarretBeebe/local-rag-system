@@ -9,6 +9,9 @@ watch_paths:
 
   - path: "/watch/Nextcloud"
     recursive: true
+    exclude_dirs:
+      # Credentials, keys, recovery codes — never index into the vector store.
+      - "Keys and Certs DO NOT DELETE"
 
   - path: "/watch/Code"
     recursive: true
