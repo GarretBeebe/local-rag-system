@@ -11,6 +11,7 @@ so documents indexed by the watcher after API startup are included.
 
 import heapq
 import logging
+import re
 import threading
 import time
 from typing import Any, TypedDict
@@ -33,6 +34,12 @@ from settings import (
 logger = logging.getLogger(__name__)
 
 _SCROLL_PAGE_SIZE = 1000
+_TOKEN_RE = re.compile(r"\w+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase word tokens; punctuation splits, so `retrieve_best(q)` yields `retrieve_best`."""
+    return _TOKEN_RE.findall(text.lower())
 
 
 class KeywordResult(TypedDict):
@@ -112,8 +119,7 @@ class KeywordIndex:
             )
             for p in points:
                 filename = p.payload.get("filename", "")
-                text = f"{filename} {p.payload.get('text', '')}"
-                tokens = text.lower().split()
+                tokens = _tokenize(f"{filename} {p.payload.get('text', '')}")
                 doc_count += 1
                 token_count += len(tokens)
                 if filename:
@@ -213,7 +219,7 @@ class KeywordIndex:
             bm25, ids = self._bm25, self._ids
         if bm25 is None:
             return []
-        tokens = query.lower().split()[:KEYWORD_MAX_QUERY_TOKENS]
+        tokens = _tokenize(query)[:KEYWORD_MAX_QUERY_TOKENS]
         if len(tokens) < KEYWORD_MIN_QUERY_TOKENS:
             return []
         scores = bm25.get_scores(tokens)
@@ -229,7 +235,9 @@ class KeywordIndex:
             with_vectors=False,
         )
         payload_by_id = {p.id: p.payload for p in points}
+        # Points deleted since the last rebuild (re-indexed files) come back missing; skip them.
         return [
-            {"id": pid, "payload": payload_by_id.get(pid, {}), "bm25_score": score}
+            {"id": pid, "payload": payload_by_id[pid], "bm25_score": score}
             for score, pid in ranked
+            if pid in payload_by_id
         ]

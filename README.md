@@ -42,8 +42,7 @@ Hybrid --> KeywordSearch
 VectorSearch --> Merge
 KeywordSearch --> Merge
 
-Merge --> MMR[MMR Diversification]
-MMR --> Rerank[Cross Encoder Reranking]
+Merge[Rank Fusion + Dedupe] --> Rerank[Cross Encoder Reranking]
 
 Rerank --> Prompt[Context + Question]
 Prompt --> LLM[Local LLM]
@@ -339,11 +338,9 @@ the relevant container (`api` or `watcher`).
 | Variable | Default | Description |
 | --- | --- | --- |
 | `RAG_TIMING` | `0` | Set to `1` to log per-stage timings (embed, recall, rerank, generate) on every request |
-| `MMR_ENABLED` | `true` | Set to `false` to skip MMR diversification; reduces payload size and CPU work |
 | `RECALL_K` | `15` | Number of candidates fetched from Qdrant and BM25 before reranking |
-| `MMR_K` | `12` | Number of candidates kept after MMR diversification |
+| `RERANK_K` | `15` | Number of fused candidates the cross-encoder reranks (must be >= `FINAL_K`) |
 | `FINAL_K` | `4` | Number of chunks passed to the LLM after reranking |
-| `MMR_LAMBDA_MULT` | `0.7` | MMR trade-off: 1.0 = pure relevance, 0.0 = pure diversity |
 | `KEYWORD_REFRESH_INTERVAL` | `30` | Seconds between cheap checks for watcher-indexed changes; BM25 rebuilds only when indexed content changed |
 | `MAX_CHUNK_CHARS` | `2000` | Maximum characters per chunk for all chunkers (text, Python, Markdown) |
 
@@ -547,10 +544,9 @@ The query pipeline runs these stages in sequence:
 
 1.  Query embedding (Ollama)
 2.  Hybrid recall — Qdrant vector search + BM25 keyword search
-3.  Deduplication by point ID
-4.  MMR diversification (optional, see `MMR_ENABLED`)
-5.  Cross-encoder reranking (CPU)
-6.  Prompt assembly and LLM generation (Ollama, streamed)
+3.  Reciprocal Rank Fusion of both lists; chunks with identical text count once
+4.  Cross-encoder reranking of the top `RERANK_K` (CPU)
+5.  Prompt assembly and LLM generation (Ollama, streamed)
 
 Implemented latency improvements:
 
@@ -560,10 +556,11 @@ Implemented latency improvements:
 | Per-thread HTTP sessions | One `requests.Session` per RAG worker thread — TCP connections to Ollama reused without contention |
 | BM25 `heapq.nlargest` | Partial top-k sort replaces full O(n log n) sort on every query |
 | Zero-score BM25 filter | Irrelevant keyword results excluded before reranking |
-| Candidate deduplication | Vector and keyword overlap removed before cross-encoder |
+| Rank fusion + text dedupe | Vector and keyword lists merged by RRF; exact-duplicate chunks (same file indexed twice) removed before the cross-encoder |
+| Reranker batch size 8 | Length-sorted small batches avoid padding waste (~2.4x faster reranking) |
 | Reduced default candidate counts | recall\_k 30→15, mmr\_k 10→8, final\_k 6→4 |
-| Optional MMR disable | `MMR_ENABLED=false` skips vector fetch and cosine work entirely |
-| Per-stage timing | `RAG_TIMING=1` logs each stage's wall time for profiling |
+| MMR removed | Its diversity was undone by the relevance-only reranker; dropping it removed 46 ms of Python per query and the vector fetch |
+| Per-stage timing | `RAG_TIMING=1` logs each stage's wall time, plus Ollama's model-load and prompt-prefill time per answer |
 
 ------------------------------------------------------------------------
 

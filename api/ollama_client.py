@@ -11,6 +11,7 @@ from typing import Any
 import requests
 from requests import RequestException
 
+from api.timing import log_generation_stats
 from api.timing import timed as _timed
 from settings import (
     GENERATION_CONCURRENCY_LIMIT,
@@ -141,6 +142,7 @@ def generate(
         raise RuntimeError(f"Ollama generate returned invalid JSON: {e}") from e
     if "response" not in data:
         raise RuntimeError(f"Ollama generate missing 'response' field: {data.get('error', data)}")
+    log_generation_stats(data)
     return data["response"]
 
 
@@ -177,4 +179,5 @@ def stream_generate(
             if data.get("response"):
                 yield data["response"]
             if data.get("done"):
+                log_generation_stats(data)
                 break

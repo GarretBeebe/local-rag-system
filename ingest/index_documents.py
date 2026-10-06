@@ -2,13 +2,10 @@
 Document ingestion pipeline: loads files, splits them into overlapping chunks,
 generates embeddings via Ollama, and upserts the results into Qdrant.
 
-Exposes public functions used by the filesystem watcher:
+Exposes public functions used by the filesystem watcher (the only ingestion path):
   - index_file(path)                — chunk, embed, and upsert a single file
   - remove_indexed_document(path)   — delete vectors and fingerprint for a file
   - delete_document(filepath)       — remove only Qdrant vectors for a file
-
-Can also be run directly as a script to batch-index the documents directory:
-  python ingest/index_documents.py
 """
 
 import logging
@@ -24,24 +21,16 @@ from qdrant_client.models import (
     PointStruct,
     VectorParams,
 )
-from tqdm import tqdm
 
 from api.embed import embed_batch
-from common.paths import has_allowed_extension, normalize_extensions, normalize_path
+from common.paths import normalize_path
 from common.qdrant import get_qdrant_client
 from common.types import IndexDecision
 from indexer.fingerprint_store import delete_hash
 from ingest.chunkers import chunk_document
-from settings import (
-    ALLOWED_EXTENSIONS,
-    COLLECTION,
-    DOCS_PATH,
-    MAX_FILE_SIZE,
-    VECTOR_SIZE,
-)
+from settings import COLLECTION, MAX_FILE_SIZE, VECTOR_SIZE
 
 logger = logging.getLogger(__name__)
-_ALLOWED_EXTENSIONS = normalize_extensions(ALLOWED_EXTENSIONS)
 _collection_ensured: bool = False
 
 
@@ -198,22 +187,3 @@ def remove_indexed_document(filepath: Path | str) -> None:
     normalized_path = normalize_path(filepath)
     delete_document(normalized_path)
     delete_hash(normalized_path)
-
-
-def main() -> None:
-    files = [
-        p
-        for p in DOCS_PATH.rglob("*")
-        if p.is_file() and has_allowed_extension(p, _ALLOWED_EXTENSIONS)
-    ]
-    print(f"Found {len(files)} files to index")
-
-    if not files:
-        return
-
-    for f in tqdm(files):
-        index_file(f)
-
-
-if __name__ == "__main__":
-    main()

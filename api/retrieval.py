@@ -1,9 +1,10 @@
 """
-Multi-stage retrieval pipeline: hybrid recall, MMR diversification, and reranking.
+Multi-stage retrieval pipeline: hybrid recall, rank fusion, and reranking.
 
 Pipeline stages:
-  1. hybrid_recall  — combines Qdrant vector search with BM25 keyword search
-  2. mmr_select     — applies Maximal Marginal Relevance to diversify results
+  1. hybrid_recall  — Qdrant vector search and BM25 keyword search, run side by side
+  2. _fuse          — Reciprocal Rank Fusion merges both ranked lists and drops chunks
+                      whose text is an exact duplicate (e.g. the same file indexed twice)
   3. rerank         — scores (question, chunk) pairs with a cross-encoder model
 
 Entry point for callers is retrieve_best(), which runs all three stages and
@@ -12,30 +13,20 @@ returns the top-ranked chunks ready to be passed to the LLM.
 
 import difflib
 import logging
-import math
 import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import FieldCondition, Filter, MatchAny
 from sentence_transformers import CrossEncoder
 
 from api.embed import embed
 from api.keyword_index import KeywordIndex, KeywordResult
 from api.timing import timed as _timed
 from common.qdrant import get_qdrant_client
-from settings import (
-    ALLOWED_EXTENSIONS,
-    COLLECTION,
-    FINAL_K,
-    MMR_ENABLED,
-    MMR_K,
-    MMR_LAMBDA_MULT,
-    RECALL_K,
-    RERANK_MODEL,
-)
+from settings import COLLECTION, FINAL_K, RECALL_K, RERANK_K, RERANK_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +41,6 @@ class Chunk:
     payload: dict[str, Any]
     score: float
     rerank_score: float | None = field(default=None)
-    vector: list[float] | None = field(default=None)
 
 
 _reranker: CrossEncoder | None = None
@@ -58,9 +48,14 @@ _reranker_lock = threading.Lock()
 _reranker_model_name = RERANK_MODEL
 _keyword_index: KeywordIndex | None = None
 
-_FILENAME_RE = re.compile(r"\b([\w.-]+\.[a-zA-Z]{2,5})\b")
-_FILENAME_FUZZY_N = 1
+# A "name.ext" token in the question; 1-letter extensions cover .c and .h files.
+_FILENAME_RE = re.compile(r"\b([\w.-]+\.[a-zA-Z]{1,5})\b")
 _FILENAME_FUZZY_CUTOFF = 0.75
+# Standard Reciprocal Rank Fusion constant; damps the advantage of the very top ranks.
+_RRF_K = 60
+# CrossEncoder.predict length-sorts pairs before batching, so small batches keep short
+# chunks from being padded to the longest one (measured ~2.4x faster than the default 32).
+_RERANK_BATCH_SIZE = 8
 
 
 def startup(rerank_model: str = RERANK_MODEL) -> None:
@@ -97,40 +92,33 @@ def _get_keyword_index() -> KeywordIndex:
     return _keyword_index
 
 
-def _extract_filename(question: str) -> str | None:
-    """Return a filename from the query if it matches a known indexed file, else None."""
-    match = _FILENAME_RE.search(question)
-    if not match:
-        return None
-    candidate = match.group(1)
-    if Path(candidate).suffix.lower() not in ALLOWED_EXTENSIONS:
-        return None
-    known = _get_keyword_index().known_filenames
-    if candidate in known:
-        return candidate
-    close = difflib.get_close_matches(
-        candidate, known, n=_FILENAME_FUZZY_N, cutoff=_FILENAME_FUZZY_CUTOFF
-    )
-    return close[0] if close else None
-
-
-def cosine(a: list[float], b: list[float]) -> float:
-    """Returns the cosine similarity between two vectors, or 0.0 if either is zero-length."""
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    return dot / (na * nb)
+def _extract_filenames(question: str) -> list[str]:
+    """Return the indexed filenames a question names (every case variant), or []."""
+    candidates = [m.group(1).lower() for m in _FILENAME_RE.finditer(question)]
+    if not candidates:
+        return []
+    by_lower: dict[str, list[str]] = {}
+    for name in _get_keyword_index().known_filenames:
+        by_lower.setdefault(name.lower(), []).append(name)
+    for candidate in candidates:
+        if candidate in by_lower:
+            return by_lower[candidate]
+        suffix = Path(candidate).suffix
+        same_suffix = [name for name in by_lower if name.endswith(suffix)]
+        close = difflib.get_close_matches(
+            candidate, same_suffix, n=1, cutoff=_FILENAME_FUZZY_CUTOFF
+        )
+        if close:
+            return by_lower[close[0]]
+    return []
 
 
 def qdrant_recall(
     question_vec: list[float],
     limit: int = RECALL_K,
-    with_vectors: bool = False,
     query_filter: Filter | None = None,
 ) -> list[Chunk]:
-    """Returns candidate chunks; fetches vectors only when needed for MMR."""
+    """Returns the nearest chunks by vector similarity."""
     with _timed("qdrant_recall"):
         try:
             res = get_qdrant_client().query_points(
@@ -139,45 +127,12 @@ def qdrant_recall(
                 query_filter=query_filter,
                 limit=limit,
                 with_payload=True,
-                with_vectors=with_vectors,
             )
-            results = [
-                Chunk(id=p.id, score=p.score, vector=p.vector, payload=p.payload)
-                for p in res.points
-            ]
+            results = [Chunk(id=p.id, score=p.score, payload=p.payload) for p in res.points]
         except Exception as e:
             logger.error("Qdrant vector recall failed: %s: %s", type(e).__name__, e)
             raise RetrievalError(str(e)) from e
     return results
-
-
-def mmr_select(
-    question_vec: list[float],
-    candidates: list[Chunk],
-    top_n: int = MMR_K,
-    lambda_mult: float = MMR_LAMBDA_MULT,
-) -> list[Chunk]:
-    """Select a diverse subset of candidates using Maximal Marginal Relevance.
-
-    Only candidates that include a dense vector are considered; keyword-only
-    results without vectors should be filtered out by the caller.
-    """
-
-    def mmr_score(c: Chunk, selected: list[Chunk]) -> float:
-        sim_to_query = cosine(question_vec, c.vector)
-        diversity_penalty = max(cosine(c.vector, s.vector) for s in selected) if selected else 0.0
-        return lambda_mult * sim_to_query - (1.0 - lambda_mult) * diversity_penalty
-
-    selected = []
-    remaining = candidates[:]
-
-    while remaining and len(selected) < top_n:
-        best_idx = max(range(len(remaining)), key=lambda i: mmr_score(remaining[i], selected))
-        selected.append(remaining[best_idx])
-        remaining[best_idx] = remaining[-1]
-        remaining.pop()
-
-    return selected
 
 
 def rerank(question: str, candidates: list[Chunk], top_n: int = FINAL_K) -> list[Chunk]:
@@ -187,15 +142,9 @@ def rerank(question: str, candidates: list[Chunk], top_n: int = FINAL_K) -> list
 
     with _timed("rerank"):
         pairs = [(question, c.payload.get("text", "")) for c in candidates]
-        scores = _get_reranker().predict(pairs)
+        scores = _get_reranker().predict(pairs, batch_size=_RERANK_BATCH_SIZE)
 
-    if len(scores) != len(candidates):
-        logger.warning(
-            "rerank: score count (%d) != candidate count (%d), truncating",
-            len(scores),
-            len(candidates),
-        )
-    for c, s in zip(candidates, scores, strict=False):
+    for c, s in zip(candidates, scores, strict=True):
         c.rerank_score = float(s)
 
     return sorted(candidates, key=lambda x: x.rerank_score or 0.0, reverse=True)[:top_n]
@@ -205,17 +154,15 @@ def hybrid_recall(
     question: str,
     question_vec: list[float],
     limit: int = RECALL_K,
-    filename: str | None = None,
-) -> list[Chunk]:
-    """Combine dense vector recall from Qdrant with BM25 keyword search results."""
+    filenames: list[str] | None = None,
+) -> tuple[list[Chunk], list[Chunk]]:
+    """Return (vector results, keyword results), each ranked best-first."""
     query_filter = (
-        Filter(must=[FieldCondition(key="filename", match=MatchValue(value=filename))])
-        if filename
+        Filter(must=[FieldCondition(key="filename", match=MatchAny(any=filenames))])
+        if filenames
         else None
     )
-    vector_results = qdrant_recall(
-        question_vec, limit=limit, with_vectors=MMR_ENABLED, query_filter=query_filter
-    )
+    vector_results = qdrant_recall(question_vec, limit=limit, query_filter=query_filter)
 
     keyword_results: list[KeywordResult]
     try:
@@ -223,59 +170,56 @@ def hybrid_recall(
     except Exception as e:
         logger.error("BM25 keyword search failed: %s: %s", type(e).__name__, e)
         keyword_results = []
-    if filename:
-        keyword_results = [r for r in keyword_results if r["payload"].get("filename") == filename]
+    if filenames:
+        keyword_results = [r for r in keyword_results if r["payload"].get("filename") in filenames]
 
-    keyword_candidates = [
-        Chunk(id=r["id"], payload=r["payload"], vector=None, score=r["bm25_score"])
-        for r in keyword_results
+    keyword_chunks = [
+        Chunk(id=r["id"], payload=r["payload"], score=r["bm25_score"]) for r in keyword_results
     ]
+    return vector_results, keyword_chunks
 
-    return vector_results + keyword_candidates
 
+def _fuse(*ranked_lists: list[Chunk]) -> list[Chunk]:
+    """Merge ranked lists with Reciprocal Rank Fusion; chunks with identical text count once.
 
-def _deduplicate(candidates: list[Chunk]) -> list[Chunk]:
-    """Remove duplicate chunks by point id, preserving order."""
-    seen: set[str | int] = set()
-    result = []
-    for c in candidates:
-        if c.id not in seen:
-            seen.add(c.id)
-            result.append(c)
-    return result
+    Each list adds 1 / (_RRF_K + rank) per distinct text, so a chunk both searches rank well
+    rises to the top, while a text repeated within one list (the same file indexed twice)
+    cannot add up. Chunks without text are dropped. The fused score replaces Chunk.score.
+    """
+    fused: dict[str, Chunk] = {}
+    scores: dict[str, float] = {}
+    for ranked in ranked_lists:
+        seen: set[str] = set()
+        for chunk in ranked:
+            text = chunk.payload.get("text", "")
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            rank = len(seen)
+            fused.setdefault(text, chunk)
+            scores[text] = scores.get(text, 0.0) + 1.0 / (_RRF_K + rank)
+    for text, chunk in fused.items():
+        chunk.score = scores[text]
+    return sorted(fused.values(), key=lambda c: c.score, reverse=True)
 
 
 def retrieve_best(
     question: str,
     recall_k: int = RECALL_K,
-    mmr_k: int = MMR_K,
+    rerank_k: int = RERANK_K,
     final_k: int = FINAL_K,
 ) -> list[Chunk]:
-    """Run hybrid recall, optional MMR diversification, and reranking to get top chunks."""
-    filename = _extract_filename(question)
+    """Run hybrid recall, rank fusion, and cross-encoder reranking to get the top chunks."""
+    filenames = _extract_filenames(question)
 
     with _timed("embed"):
         qvec = embed(question)
 
     with _timed("hybrid_recall"):
-        candidates = hybrid_recall(question, qvec, limit=recall_k, filename=filename)
+        vector_results, keyword_results = hybrid_recall(
+            question, qvec, limit=recall_k, filenames=filenames
+        )
 
-    if not candidates:
-        return []
-
-    # Dedupe by point id — vector and keyword results can overlap.
-    candidates = _deduplicate(candidates)
-
-    vector_candidates = [c for c in candidates if c.vector is not None]
-
-    if not vector_candidates:
-        return rerank(question, candidates, top_n=final_k)
-
-    if MMR_ENABLED:
-        with _timed("mmr_select"):
-            diversified = mmr_select(qvec, vector_candidates, top_n=mmr_k)
-    else:
-        diversified = vector_candidates[:mmr_k]
-
-    merged = diversified + [c for c in candidates if c.vector is None]
-    return rerank(question, merged, top_n=final_k)
+    # Rerank at least final_k candidates: /v1/retrieve may ask for more than RERANK_K.
+    candidates = _fuse(vector_results, keyword_results)[: max(rerank_k, final_k)]
+    return rerank(question, candidates, top_n=final_k)

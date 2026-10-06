@@ -76,3 +76,41 @@ def test_build_disables_bm25_when_doc_limit_exceeded(monkeypatch):
     assert index.doc_count == 2
     assert index.known_filenames == {"one.txt", "two.txt"}
     assert "exceeds KEYWORD_INDEX_MAX_DOCS" in index.disabled_reason
+
+
+def test_tokenize_splits_identifiers_from_punctuation():
+    from api.keyword_index import _tokenize
+
+    assert _tokenize("def retrieve_best(question: str) -> list[Chunk]:") == [
+        "def",
+        "retrieve_best",
+        "question",
+        "str",
+        "list",
+        "chunk",
+    ]
+    assert _tokenize("What does retrieve_best do?") == ["what", "does", "retrieve_best", "do"]
+
+
+def test_search_skips_ids_deleted_since_last_rebuild(monkeypatch):
+    class FakeBM25:
+        def get_scores(self, tokens):
+            return [2.0, 1.0]
+
+    class Point:
+        def __init__(self, point_id, payload):
+            self.id = point_id
+            self.payload = payload
+
+    class Client:
+        def retrieve(self, **kwargs):
+            return [Point("live", {"text": "still indexed"})]  # "gone" was re-indexed away
+
+    index = KeywordIndex()
+    index._bm25, index._ids = FakeBM25(), ["gone", "live"]
+    monkeypatch.setattr("api.keyword_index.get_qdrant_client", lambda: Client())
+
+    results = index.search("anything")
+
+    assert [r["id"] for r in results] == ["live"]
+    assert results[0]["payload"] == {"text": "still indexed"}

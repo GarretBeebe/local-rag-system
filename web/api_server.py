@@ -114,6 +114,13 @@ def _get_rag_concurrency() -> asyncio.Semaphore:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _RAG_EXECUTOR, _RAG_CONCURRENCY
+    # uvicorn only configures its own loggers. Show this app's INFO logs (incl. RAG_TIMING)
+    # while keeping chatty libraries (httpx logs every Qdrant call at INFO) at WARNING.
+    logging.basicConfig(
+        level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
+    for name in ("api", "common", "web"):
+        logging.getLogger(name).setLevel(logging.INFO)
     _RAG_EXECUTOR = ThreadPoolExecutor(max_workers=RAG_EXECUTOR_WORKERS)
     _RAG_CONCURRENCY = asyncio.Semaphore(RAG_CONCURRENCY_LIMIT)
 
@@ -166,10 +173,6 @@ def _extract_bearer_token(request: Request) -> str:
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next: Callable[..., Any]) -> Response:
-    request_id = uuid.uuid4().hex[:12]
-    request.state.request_id = request_id
-    logger.info("[%s] %s %s", request_id, request.method, request.url.path)
-
     if request.url.path == "/favicon.ico" or request.url.path.startswith("/ui"):
         return await call_next(request)
     if request.url.path == "/healthz":
@@ -550,12 +553,10 @@ async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
 async def _warm_models() -> None:
     logger.info("Warming RAG models...")
     await asyncio.gather(
+        # generate() sends the same num_ctx as real requests (a mismatch makes Ollama reload
+        # the model), and an empty prompt only loads the model without generating.
         _warm_one(
-            "LLM",
-            ollama_client.post,
-            "/api/generate",
-            json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
-            timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS,
+            "LLM", ollama_client.generate, "", GEN_MODEL, timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS
         ),
         _warm_one("Embedding model", embed, "warmup"),
         _warm_one(

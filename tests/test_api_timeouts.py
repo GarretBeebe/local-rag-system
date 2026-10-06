@@ -141,18 +141,21 @@ def test_warm_models_passes_configured_timeout(monkeypatch):
     import asyncio
 
     import web.api_server as srv
-    from settings import OLLAMA_WARMUP_TIMEOUT_SECONDS
+    from settings import OLLAMA_NUM_CTX, OLLAMA_WARMUP_TIMEOUT_SECONDS
 
     captured = {}
 
-    def fake_post(path, **kwargs):
+    def fake_post_with_retry(path, **kwargs):
         if path == "/api/generate":
-            captured["timeout"] = kwargs.get("timeout")
+            captured.update(timeout=kwargs.get("timeout"), json=kwargs.get("json"))
         raise RuntimeError("suppressed by _warm_one try/except")
 
-    monkeypatch.setattr(srv.ollama_client, "post", fake_post)
+    monkeypatch.setattr(srv.ollama_client, "post_with_retry", fake_post_with_retry)
     asyncio.run(srv._warm_models())
     assert captured.get("timeout") == OLLAMA_WARMUP_TIMEOUT_SECONDS
+    # An empty prompt loads the model only; num_ctx must match real requests to avoid a reload.
+    assert captured["json"]["prompt"] == ""
+    assert captured["json"]["options"]["num_ctx"] == OLLAMA_NUM_CTX
 
 
 def test_model_warmup_is_opt_in_by_default():

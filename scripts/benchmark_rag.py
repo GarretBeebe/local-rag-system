@@ -1,23 +1,17 @@
-"""Small benchmark helper for API latency and ingestion throughput.
+"""Small benchmark helper for end-to-end API query latency.
 
 Examples:
     uv run python scripts/benchmark_rag.py query --questions "What is this system?"
     uv run python scripts/benchmark_rag.py query --concurrency 2 --repeat 5
-    uv run python scripts/benchmark_rag.py ingest --path documents
 """
 
 import argparse
 import concurrent.futures
 import statistics
 import time
-from pathlib import Path
 from typing import Any
 
 import requests
-
-from common.paths import has_allowed_extension, normalize_extensions
-from ingest.index_documents import index_file
-from settings import ALLOWED_EXTENSIONS
 
 DEFAULT_QUESTIONS = [
     "What does this system do?",
@@ -71,25 +65,6 @@ def benchmark_query(args: argparse.Namespace) -> None:
     print(f"max={max(timings):.2f}s")
 
 
-def benchmark_ingest(args: argparse.Namespace) -> None:
-    root = Path(args.path)
-    allowed = normalize_extensions(ALLOWED_EXTENSIONS)
-    files = [p for p in root.rglob("*") if p.is_file() and has_allowed_extension(p, allowed)]
-    if args.limit:
-        files = files[: args.limit]
-
-    start = time.perf_counter()
-    counts: dict[str, int] = {}
-    for path in files:
-        result = index_file(path)
-        counts[result.value] = counts.get(result.value, 0) + 1
-    elapsed = time.perf_counter() - start
-
-    print(f"files={len(files)} elapsed={elapsed:.2f}s files_per_sec={len(files) / elapsed:.2f}")
-    for key in sorted(counts):
-        print(f"{key}={counts[key]}")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark local RAG operations")
     sub = parser.add_subparsers(required=True)
@@ -102,11 +77,6 @@ def main() -> None:
     query.add_argument("--repeat", type=int, default=1)
     query.add_argument("--questions", nargs="*")
     query.set_defaults(func=benchmark_query)
-
-    ingest = sub.add_parser("ingest", help="Benchmark indexing a directory")
-    ingest.add_argument("--path", default="documents")
-    ingest.add_argument("--limit", type=int, default=0)
-    ingest.set_defaults(func=benchmark_ingest)
 
     args = parser.parse_args()
     args.func(args)
