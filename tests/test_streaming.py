@@ -106,3 +106,18 @@ def test_disconnect_sets_cancel_event():
 
     asyncio.run(run())
     assert cancel_event.is_set()
+
+
+def test_worker_finishes_even_if_nobody_reads_the_queue(monkeypatch):
+    """An abandoned stream (client gone, loop stopping) must not pin the worker thread."""
+
+    async def run():
+        srv, _, executor = _setup_server(monkeypatch)
+        monkeypatch.setattr(srv, "ask_stream_sync", lambda q, m, r, cancel: iter(["x"] * 100))
+
+        _, _, future = await srv._start_stream_worker("q", "model", "augmented")
+
+        await asyncio.wait_for(future, timeout=5)  # nobody drains the queue
+        executor.shutdown(wait=False)
+
+    asyncio.run(run())

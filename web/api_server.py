@@ -310,30 +310,28 @@ async def _start_stream_worker(
     by the time this runs inside a StreamingResponse generator.
     """
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue(maxsize=32)
+    # Unbounded, and fed without waiting: the worker must never block on a stream nobody is
+    # reading (client gone, event loop shutting down), or it would pin its thread and RAG slot
+    # forever. One LLM answer is all that can accumulate, so the buffer stays small.
+    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
     cancel_event = threading.Event()
+
+    def _send(item: str | Exception | None) -> bool:
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+        except RuntimeError:  # event loop closed; nobody is listening anymore
+            return False
+        return True
 
     def _run():
         try:
             for text in ask_stream_sync(question, model, rag_mode, cancel_event):
-                coro = queue.put(text)
-                try:
-                    asyncio.run_coroutine_threadsafe(coro, loop).result()
-                except RuntimeError:
-                    coro.close()  # loop closed; prevent "coroutine never awaited" warning
+                if not _send(text):
                     return
         except Exception as exc:
-            coro = queue.put(exc)
-            try:
-                asyncio.run_coroutine_threadsafe(coro, loop).result()
-            except RuntimeError:
-                coro.close()
+            _send(exc)
         finally:
-            coro = queue.put(None)
-            try:
-                asyncio.run_coroutine_threadsafe(coro, loop).result()
-            except RuntimeError:
-                coro.close()
+            _send(None)
 
     started = time.monotonic()
     semaphore = await _wait_for_capacity(RAG_REQUEST_TIMEOUT_SECONDS)
