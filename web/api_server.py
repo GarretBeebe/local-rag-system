@@ -35,6 +35,7 @@ import api.ollama_client as ollama_client
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import Chunk, rerank, retrieve_best
+from common.log_config import configure_logging
 from common.types import RagMode
 from settings import (
     ALLOW_INSECURE_LOCALONLY,
@@ -113,13 +114,7 @@ def _get_rag_concurrency() -> asyncio.Semaphore:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _RAG_EXECUTOR, _RAG_CONCURRENCY
-    # uvicorn only configures its own loggers. Show this app's INFO logs (incl. RAG_TIMING)
-    # while keeping chatty libraries (httpx logs every Qdrant call at INFO) at WARNING.
-    logging.basicConfig(
-        level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
-    for name in ("api", "common", "web"):
-        logging.getLogger(name).setLevel(logging.INFO)
+    configure_logging()  # uvicorn only configures its own loggers
     _RAG_EXECUTOR = ThreadPoolExecutor(max_workers=RAG_EXECUTOR_WORKERS)
     _RAG_CONCURRENCY = asyncio.Semaphore(RAG_CONCURRENCY_LIMIT)
 

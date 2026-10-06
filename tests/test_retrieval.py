@@ -15,9 +15,9 @@ from api.retrieval import (
     _known_filenames,
     hybrid_recall,
     keyword_recall,
-    qdrant_recall,
     rerank,
     retrieve_best,
+    vector_recall,
 )
 from common.qdrant import DENSE_VECTOR, SPARSE_VECTOR
 
@@ -174,10 +174,10 @@ def test_keyword_recall_queries_bm25_vector_with_word_split_text(monkeypatch):
     assert kwargs["query"].model == "Qdrant/bm25"
 
 
-def test_qdrant_recall_queries_dense_vector(monkeypatch):
+def test_vector_recall_queries_dense_vector(monkeypatch):
     client = _mock_client(monkeypatch)
 
-    qdrant_recall([0.1, 0.2])
+    vector_recall([0.1, 0.2])
 
     assert client.query_points.call_args.kwargs["using"] == DENSE_VECTOR
 

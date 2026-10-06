@@ -11,6 +11,7 @@ Via docker exec:
 import logging
 from pathlib import Path
 
+from common.log_config import configure_logging
 from common.paths import is_under_any_root
 from indexer.fingerprint_store import init_db, list_all_paths
 from ingest.index_documents import remove_indexed_document
@@ -41,6 +42,6 @@ def cleanup_stale(accessible_roots: list[Path] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    configure_logging()
     init_db()
     cleanup_stale()

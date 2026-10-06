@@ -17,7 +17,7 @@ SPARSE_VECTOR = "bm25"
 # \w+ here and tokenizing on whitespace keeps identifiers whole without punctuation. No
 # stemming or stopwords: code identifiers are not English. avg_len is the measured mean word
 # count per chunk; it is baked into stored vectors, so changing it requires a full reindex.
-_BM25_OPTIONS = {"tokenizer": "whitespace", "language": "none", "avg_len": 64}
+_BM25_OPTIONS: dict[str, str | int] = {"tokenizer": "whitespace", "language": "none", "avg_len": 64}
 _WORD_RE = re.compile(r"\w+")
 
 _qdrant_client: QdrantClient | None = None

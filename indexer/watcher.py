@@ -26,6 +26,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
 from common.config import load_yaml_config
+from common.log_config import configure_logging
 from common.paths import (
     is_indexable_path,
     matches_ignore_pattern,
@@ -38,10 +39,6 @@ from ingest.cleanup_stale import cleanup_stale
 from ingest.index_documents import index_file, remove_indexed_document
 from settings import ALLOWED_EXTENSIONS, CONFIG_PATH, WATCHER_POLL_INTERVAL_SECONDS
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 _MAIN_LOOP_SLEEP_SECONDS = 5
@@ -240,6 +237,7 @@ def initial_scan(
 
 
 def main() -> None:
+    configure_logging()
     try:
         config = load_config()
         required_mount_roots = validate_required_mounts(config.get("required_mounts", []))

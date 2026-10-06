@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from common.config import load_yaml_config
+from common.log_config import configure_logging
 from common.paths import is_indexable_path, is_under_any_root, normalize_extensions, normalize_path
 from indexer.fingerprint_store import init_db, list_all_paths
 from ingest.index_documents import remove_indexed_document
@@ -92,7 +93,7 @@ def purge_ignored(config_path: Path, *, apply: bool) -> int:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    configure_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",

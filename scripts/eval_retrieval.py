@@ -22,7 +22,7 @@ Run inside the API image so Qdrant and Ollama are reachable (no rebuild needed):
 import statistics
 import time
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypedDict
 
 import yaml
 
@@ -33,7 +33,13 @@ _QUESTIONS_PATH = Path(__file__).with_name("eval_questions.yaml")
 _TOP_K = 10
 
 
-def _rank(chunks: list[Chunk], item: dict[str, Any]) -> int | None:
+class EvalQuestion(TypedDict):
+    q: str
+    files: list[str]
+    text: NotRequired[str]
+
+
+def _rank(chunks: list[Chunk], item: EvalQuestion) -> int | None:
     for rank, chunk in enumerate(chunks, start=1):
         path = chunk.payload.get("filepath", "")
         text = item.get("text")
@@ -45,7 +51,12 @@ def _rank(chunks: list[Chunk], item: dict[str, Any]) -> int | None:
 
 
 def main() -> None:
-    questions = yaml.safe_load(_QUESTIONS_PATH.read_text())
+    questions: list[EvalQuestion] = yaml.safe_load(_QUESTIONS_PATH.read_text()) or []
+    if len(questions) < 2:
+        raise SystemExit(
+            f"eval_retrieval: {_QUESTIONS_PATH} needs at least 2 questions "
+            f"(found {len(questions)}); the first one only warms up the reranker"
+        )
     ranks: list[int | None] = []
     latencies: list[float] = []
     context_chars: list[int] = []

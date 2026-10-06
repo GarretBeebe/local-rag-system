@@ -118,13 +118,13 @@ def _query_points(
     return [Chunk(id=p.id, score=p.score, payload=p.payload) for p in res.points]
 
 
-def qdrant_recall(
+def vector_recall(
     question_vec: list[float],
     limit: int = RECALL_K,
     query_filter: Filter | None = None,
 ) -> list[Chunk]:
     """Returns the nearest chunks by vector similarity."""
-    with _timed("qdrant_recall"):
+    with _timed("vector_recall"):
         try:
             return _query_points(question_vec, DENSE_VECTOR, limit, query_filter)
         except Exception as e:
@@ -174,7 +174,7 @@ def hybrid_recall(
         else None
     )
     return (
-        qdrant_recall(question_vec, limit=limit, query_filter=query_filter),
+        vector_recall(question_vec, limit=limit, query_filter=query_filter),
         keyword_recall(question, limit=limit, query_filter=query_filter),
     )
 
