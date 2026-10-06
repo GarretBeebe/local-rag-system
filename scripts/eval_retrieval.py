@@ -2,12 +2,16 @@
 
 Questions live in scripts/eval_questions.yaml (gitignored — it may name personal files):
 
-    - q: How are students imported from a CSV upload?
-      files: [peabody_sports_portal/app/admin/csv_import.py]
-      text: def import_students    # optional: the matching chunk must also contain this
+    - q: <question>
+      files: [<substring of the expected filepath>]
+      text: <optional string the matching chunk must also contain>
+
+Keep real examples out of this docstring: rag-system is itself indexed, so example
+questions written here would be retrieved as answers to the same eval questions.
 
 A question scores at the rank of the first returned chunk whose filepath contains one of
-`files` (and whose text contains `text`, when given).
+`files` (and whose text contains `text`, when given). "context" is the mean size of the top
+FINAL_K chunks, i.e. the retrieved part of the LLM prompt (drives prefill time).
 
 Run inside the API image so Qdrant and Ollama are reachable (no rebuild needed):
 
@@ -46,6 +50,7 @@ def main() -> None:
     api.retrieval.startup()
     ranks: list[int | None] = []
     latencies: list[float] = []
+    context_chars: list[int] = []
     try:
         for i, item in enumerate(questions):
             start = time.perf_counter()
@@ -55,6 +60,7 @@ def main() -> None:
                 latencies.append(elapsed)
             rank = _rank(chunks, item)
             ranks.append(rank)
+            context_chars.append(sum(len(c.payload.get("text", "")) for c in chunks[:FINAL_K]))
             print(f"{rank or '-':>3}  {elapsed * 1000:6.0f} ms  {item['q']}")
     finally:
         api.retrieval.shutdown()
@@ -66,7 +72,8 @@ def main() -> None:
     print(
         f"\nquestions={len(ranks)} hit@1={hit_rate(1):.2f} hit@{FINAL_K}={hit_rate(FINAL_K):.2f} "
         f"MRR@{_TOP_K}={mrr:.3f} latency mean={statistics.mean(latencies) * 1000:.0f} ms "
-        f"max={max(latencies) * 1000:.0f} ms"
+        f"max={max(latencies) * 1000:.0f} ms "
+        f"context mean={statistics.mean(context_chars):.0f} chars"
     )
 
 

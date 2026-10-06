@@ -3,12 +3,17 @@ Document chunking strategies for the ingest pipeline.
 
 Splits raw document text into chunks suitable for embedding, dispatching
 on file extension:
-  - .py              — AST-based splitting at top-level function/class boundaries;
-                       falls back to recursive character splitting if parsing fails
-                       or the file contains no top-level definitions
-  - .md / .markdown  — splits at Markdown header boundaries (H1–H6)
-  - all others       — recursive character splitting with a 500-character window
-                       and 100-character overlap
+  - .py              — AST-based splitting at top-level function/class boundaries
+                       (decorators stay with their definition); falls back to recursive
+                       character splitting if parsing fails or there are no definitions
+  - .md / .markdown  — splits at Markdown header boundaries (H1–H6), ignoring
+                       header-like lines inside code fences
+  - all others       — recursive character splitting with a CHUNK_SIZE window
+                       and CHUNK_OVERLAP overlap
+
+Python and Markdown then pack small neighbouring pieces (imports, constants, short
+sections) together up to CHUNK_SIZE, so one-line chunks don't crowd real content out
+of retrieval results.
 
 Public API: chunk_document(path, text) -> list[str]
 """
@@ -22,7 +27,7 @@ from settings import CHUNK_OVERLAP, CHUNK_SIZE, MAX_CHUNK_CHARS, MAX_MD_CHUNK
 _SEPARATORS = ["\n\n", "\n", " ", ""]
 
 
-def _merge_splits(splits: list[str], separator: str) -> list[str]:
+def _merge_splits(splits: list[str], separator: str, overlap: int = CHUNK_OVERLAP) -> list[str]:
     chunks: list[str] = []
     current: list[str] = []
     current_len = 0
@@ -33,7 +38,7 @@ def _merge_splits(splits: list[str], separator: str) -> list[str]:
         added_len = split_len + (sep_len if current else 0)
         if current and current_len + added_len > CHUNK_SIZE:
             chunks.append(separator.join(current))
-            while current and current_len > CHUNK_OVERLAP:
+            while current and current_len > overlap:
                 dropped = len(current[0]) + (sep_len if len(current) > 1 else 0)
                 current_len -= dropped
                 current.pop(0)
@@ -106,22 +111,24 @@ def chunk_python(text: str) -> list[str]:
     prev_end = 0
 
     for node in tree.body:
-        # Emit any gap (imports, assignments, comments) before this node.
-        if node.lineno > prev_end + 1:
-            _emit(_span(prev_end + 1, node.lineno - 1), chunks)
+        # Decorators belong to their definition. Clamp to prev_end so a line shared with
+        # the previous node (`import a; import b`) is not emitted twice.
+        start = min([node.lineno, *(d.lineno for d in getattr(node, "decorator_list", []))])
+        start = max(start, prev_end + 1)
 
-        # Emit the node itself.
-        segment = (
-            ast.get_source_segment(text, node) or "".join(lines[node.lineno - 1 : node.end_lineno])
-        ).strip()
-        _emit(segment, chunks)
+        # Emit any gap (comments, blank lines) before this node.
+        if start > prev_end + 1:
+            _emit(_span(prev_end + 1, start - 1), chunks)
+
+        _emit(_span(start, node.end_lineno), chunks)
         prev_end = node.end_lineno
 
     # Emit any trailing code after the last node.
     if prev_end < total_lines:
         _emit(_span(prev_end + 1, total_lines), chunks)
 
-    return chunks if chunks else chunk_text(text)
+    # Pack small neighbours (imports, constants, short functions) into shared chunks.
+    return _merge_splits(chunks, "\n\n", overlap=0) if chunks else chunk_text(text)
 
 
 # -------------------------
@@ -129,16 +136,27 @@ def chunk_python(text: str) -> list[str]:
 # -------------------------
 
 HEADER_PATTERN = re.compile(r"^#{1,6} ")
+# CommonMark code fence: up to 3 spaces of indent, 3+ backticks or tildes, optional info string.
+FENCE_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
 def _split_markdown_sections(text: str) -> list[str]:
-    """Split a markdown document into sections at header boundaries."""
+    """Split a markdown document into sections at header boundaries outside code fences."""
     lines = text.splitlines()
     sections: list[str] = []
     current: list[str] = []
+    open_fence: str | None = None  # the fence that opened the code block we are inside
 
     for line in lines:
-        if HEADER_PATTERN.match(line) and current:
+        fence = FENCE_PATTERN.match(line)
+        if fence:
+            marker, info = fence.groups()
+            if open_fence is None:
+                open_fence = marker
+            # A closing fence repeats the opening character at least as often, with no info.
+            elif marker[0] == open_fence[0] and len(marker) >= len(open_fence) and not info.strip():
+                open_fence = None
+        elif open_fence is None and HEADER_PATTERN.match(line) and current:
             sections.append("\n".join(current))
             current = []
         current.append(line)
@@ -180,14 +198,14 @@ def _split_oversized_markdown_section(section: str) -> list[str]:
 
 
 def chunk_markdown(text: str) -> list[str]:
-    """Chunk markdown into sections and sub-sections that fit within MAX_MD_CHUNK."""
+    """Chunk markdown into sections that fit within MAX_MD_CHUNK, packing small ones together."""
     sections = _split_markdown_sections(text)
     final_chunks: list[str] = []
 
     for section in sections:
         final_chunks.extend(_split_oversized_markdown_section(section))
 
-    return final_chunks
+    return _merge_splits(final_chunks, "\n\n", overlap=0)
 
 
 # -------------------------

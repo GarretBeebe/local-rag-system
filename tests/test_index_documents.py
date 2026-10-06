@@ -71,12 +71,16 @@ def test_embed_chunks_uses_one_batch_call(monkeypatch, tmp_path):
     assert {p.payload["chunk_total"] for p in points} == {3}
 
 
-def test_embed_chunks_rejects_embedding_count_mismatch(monkeypatch, tmp_path):
-    from ingest.index_documents import _embed_chunks
+def test_ensure_collection_indexes_filter_fields_on_creation(monkeypatch):
+    import ingest.index_documents as index_documents
 
-    monkeypatch.setattr("ingest.index_documents.embed_batch", lambda chunks: [[0.1] * 768])
+    client = MagicMock()
+    client.collection_exists.return_value = False
+    monkeypatch.setattr(index_documents, "get_qdrant_client", lambda: client)
+    monkeypatch.setattr(index_documents, "_collection_ensured", False)
 
-    path = tmp_path / "doc.txt"
-    path.write_text("content")
-    with pytest.raises(RuntimeError, match="Expected 2 embeddings"):
-        _embed_chunks(path, str(path), ["one", "two"], "doc-id")
+    index_documents.ensure_collection()
+
+    client.create_collection.assert_called_once()
+    indexed = {c.kwargs["field_name"] for c in client.create_payload_index.call_args_list}
+    assert indexed == {"filepath", "filename"}

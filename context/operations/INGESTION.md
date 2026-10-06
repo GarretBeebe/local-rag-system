@@ -8,9 +8,9 @@ documents → loader → chunking → embedding → vector storage
 
 ## Document Sources
 
-Documents are typically placed in:
-
-documents/
+The watcher indexes the folders listed in
+`config/watcher_config.container.yaml` and keeps them in sync (it is the only
+ingestion path).
 
 Supported formats:
 
@@ -23,10 +23,16 @@ Supported formats:
 
 ## Chunking Strategy
 
-Example parameters:
+Chunks follow the document's structure:
 
-chunk_size = 500\
-chunk_overlap = 100
+-   Python: one segment per top-level function/class (decorators included)
+-   Markdown: one segment per header section (`#` lines inside code fences
+    are not headers)
+-   Everything else: 500-character windows with 100 characters of overlap
+
+Python and Markdown segments smaller than `CHUNK_SIZE` (500) are then packed
+together with their neighbours, so a file's imports or a short section share
+one chunk instead of producing many one-line chunks.
 
 Reasons:
 
@@ -48,7 +54,10 @@ This metadata enables citation and debugging of retrieval results.
 
 ## Embedding Generation
 
-Chunks are converted into vectors using the embedding model.
+Chunks are converted into vectors using the embedding model, as-is. The
+`search_query:` / `search_document:` prefixes recommended for nomic-embed-text
+measured worse on this corpus (see `api/embed.py`). Changing embedding inputs or
+the model requires a full reindex.
 
 ## Vector Storage
 

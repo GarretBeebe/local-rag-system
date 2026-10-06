@@ -117,7 +117,8 @@ The ingestion pipeline supports:
     │   └── users.sqlite3            ← web UI user credentials
     │
     ├── scripts/
-    │   └── smoke_rag.py             ← end-to-end smoke test (requires live services)
+    │   ├── benchmark_rag.py         ← end-to-end query latency benchmark
+    │   └── eval_retrieval.py        ← retrieval quality eval (hit@k, MRR, latency)
     │
     ├── tests/
     │   ├── conftest.py              ← session-wide mocks for unit tests
@@ -376,17 +377,23 @@ Enable timing to identify which pipeline stage dominates latency:
 
 # Document Ingestion
 
-Manual indexing
+The watcher is the only ingestion path: it indexes the folders in
+`config/watcher_config.container.yaml` and keeps them in sync.
 
-    docker exec rag-api python ingest/index_documents.py
+Reset and rebuild the collection (also clears the fingerprint store). Stop the
+watcher first: a running watcher remembers the old collection and would fail
+every write after the reset, and only a restart triggers a full re-scan.
 
-Reset collection (also clears the fingerprint store so the watcher re-indexes from scratch)
+    docker compose stop watcher
+    docker compose run --rm --no-deps watcher python -m ingest.reset_collection
+    docker compose up -d watcher
 
-    docker exec rag-api python ingest/reset_collection.py
+The watcher recreates the collection (with payload indexes) and re-indexes
+everything; the initial scan only queues files, so wait for the Qdrant point
+count to stop changing before relying on results.
 
-To delete vectors only and leave fingerprints intact:
-
-    docker exec rag-api python ingest/reset_collection.py --vectors-only
+To delete vectors only and leave fingerprints intact, add `--vectors-only` to
+the reset command.
 
 ------------------------------------------------------------------------
 
@@ -665,9 +672,11 @@ if unavailable):
 
     .venv/bin/python -m pytest tests/ -m integration -q
 
-End-to-end smoke test (requires both Qdrant and Ollama):
+Retrieval quality eval (requires the running stack; questions live in the
+gitignored `scripts/eval_questions.yaml`, format in the script docstring):
 
-    .venv/bin/python scripts/smoke_rag.py
+    docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts:ro" api \
+        python -m scripts.eval_retrieval
 
 Lint:
 

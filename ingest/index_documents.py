@@ -18,6 +18,7 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -49,6 +50,14 @@ def ensure_collection() -> None:
             collection_name=COLLECTION,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
+        # Qdrant recommends indexing filter fields before points arrive: stale-vector deletes
+        # match on filepath, and filename-aware retrieval filters on filename.
+        for field_name in ("filepath", "filename"):
+            client.create_payload_index(
+                collection_name=COLLECTION,
+                field_name=field_name,
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
     _collection_ensured = True
 
 
@@ -71,28 +80,21 @@ def _embed_chunks(
 ) -> list[PointStruct]:
     """Embed each chunk and return PointStructs with metadata."""
     vectors = embed_batch(chunks)
-    if len(vectors) != len(chunks):
-        raise RuntimeError(f"Expected {len(chunks)} embeddings, got {len(vectors)}")
-
-    points = []
-    for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True)):
-        points.append(
-            PointStruct(
-                id=str(uuid.uuid4()),
-                vector=vec,
-                payload={
-                    "text": chunk,
-                    "document_id": document_id,
-                    "filename": path.name,
-                    "filepath": filepath,
-                    "chunk_index": i,
-                    "chunk_total": 0,  # corrected below once all chunks are embedded
-                },
-            )
+    return [
+        PointStruct(
+            id=str(uuid.uuid4()),
+            vector=vec,
+            payload={
+                "text": chunk,
+                "document_id": document_id,
+                "filename": path.name,
+                "filepath": filepath,
+                "chunk_index": i,
+                "chunk_total": len(chunks),
+            },
         )
-    for p in points:
-        p.payload["chunk_total"] = len(points)
-    return points
+        for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True))
+    ]
 
 
 def _upsert_chunks(filepath: str, points: list[PointStruct]) -> IndexDecision:
@@ -100,7 +102,6 @@ def _upsert_chunks(filepath: str, points: list[PointStruct]) -> IndexDecision:
     index_version = str(uuid.uuid4())
     for p in points:
         p.payload["index_version"] = index_version
-        p.payload["active"] = True
     client = get_qdrant_client()
     try:
         client.upsert(collection_name=COLLECTION, points=points)
@@ -158,10 +159,6 @@ def index_file(path: Path) -> IndexDecision:
         logger.error("Embedding failed for %s: %s", path, e)
         return IndexDecision.FAILED
     elapsed["embed"] = time.monotonic() - t0
-
-    if not points:
-        logger.warning("No valid chunks to index for %s", path)
-        return IndexDecision.FAILED
 
     t0 = time.monotonic()
     result = _upsert_chunks(normalized_path, points)

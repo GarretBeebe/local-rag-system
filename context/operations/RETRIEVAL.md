@@ -34,9 +34,12 @@ Vector search struggles with:
 
 Keyword search fills these gaps.
 
-## Diversification (MMR)
+## Rank Fusion
 
-Removes redundant results and increases topical diversity.
+Reciprocal Rank Fusion merges the vector and keyword result lists: a chunk
+ranked well by both rises to the top. Chunks with identical text (the same
+file indexed twice) count once, so repeats don't take several context slots.
+The top `RERANK_K` fused candidates go to the reranker.
 
 ## Reranking
 
