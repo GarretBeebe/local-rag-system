@@ -2,7 +2,7 @@
 Integration tests for re-indexing semantics.
 
 These are the highest-priority regression tests for Phase 1. They require a
-live Qdrant instance (automatically skipped if unavailable) and mock embed()
+live Qdrant instance (automatically skipped if unavailable) and mock embed_batch()
 so they do not need Ollama.
 
 Run: pytest -m integration
@@ -116,10 +116,10 @@ def test_failed_reindex_does_not_update_fingerprint(tmp_path, monkeypatch):
 
     upsert_hash(normalized, "old-hash-value")
 
-    def _fail(text):
+    def _fail(texts):
         raise RuntimeError("forced embed failure")
 
-    monkeypatch.setattr("ingest.index_documents.embed", _fail)
+    monkeypatch.setattr("ingest.index_documents.embed_batch", _fail)
 
     outcome = index_file(f)
     assert outcome == "failed"

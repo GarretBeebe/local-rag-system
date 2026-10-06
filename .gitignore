@@ -54,3 +54,6 @@ logs/
 
 # Runtime data
 data/
+
+# Retrieval eval questions may name personal files
+scripts/eval_questions.yaml

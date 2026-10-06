@@ -9,18 +9,18 @@ import pytest
 import settings as s
 
 
-def test_final_k_greater_than_mmr_k_raises(monkeypatch):
+def test_final_k_greater_than_rerank_k_raises(monkeypatch):
     monkeypatch.setattr(s, "FINAL_K", 10)
-    monkeypatch.setattr(s, "MMR_K", 5)
+    monkeypatch.setattr(s, "RERANK_K", 5)
     with pytest.raises(ValueError, match="FINAL_K"):
         s._validate_settings()
 
 
-def test_mmr_k_greater_than_recall_k_raises(monkeypatch):
-    monkeypatch.setattr(s, "MMR_K", 20)
+def test_rerank_k_may_exceed_recall_k(monkeypatch):
+    # Fusion draws from two recall lists, so up to 2 * RECALL_K candidates exist.
+    monkeypatch.setattr(s, "RERANK_K", 20)
     monkeypatch.setattr(s, "RECALL_K", 15)
-    with pytest.raises(ValueError, match="MMR_K"):
-        s._validate_settings()
+    s._validate_settings()  # should not raise
 
 
 def test_chunk_overlap_equals_chunk_size_raises(monkeypatch):
@@ -40,18 +40,6 @@ def test_max_chunk_chars_less_than_chunk_size_raises(monkeypatch):
     monkeypatch.setattr(s, "MAX_CHUNK_CHARS", 100)
     monkeypatch.setattr(s, "CHUNK_SIZE", 500)
     with pytest.raises(ValueError, match="MAX_CHUNK_CHARS"):
-        s._validate_settings()
-
-
-def test_mmr_lambda_mult_above_one_raises(monkeypatch):
-    monkeypatch.setattr(s, "MMR_LAMBDA_MULT", 1.1)
-    with pytest.raises(ValueError, match="MMR_LAMBDA_MULT"):
-        s._validate_settings()
-
-
-def test_mmr_lambda_mult_negative_raises(monkeypatch):
-    monkeypatch.setattr(s, "MMR_LAMBDA_MULT", -0.1)
-    with pytest.raises(ValueError, match="MMR_LAMBDA_MULT"):
         s._validate_settings()
 
 

@@ -13,3 +13,4 @@ context/
 .mypy_cache
 *.egg-info
 *.sqlite3
+scripts/eval_questions.yaml

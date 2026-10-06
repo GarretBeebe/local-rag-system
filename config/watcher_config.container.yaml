@@ -86,6 +86,9 @@ ignore_patterns:
   - "out"
   - ".next"
 
+  # Minified bundles (vendored libraries): unreadable noise in search results
+  - "*.min.js"
+
   # IDE
   - ".idea"
   - ".vscode"

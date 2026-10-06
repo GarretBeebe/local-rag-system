@@ -6,7 +6,6 @@ Defaults assume a bare-metal/local install with all services on localhost.
 
 Path resolution lives here so no other module needs __file__ manipulation:
     CONFIG_PATH — watcher config yaml
-    DOCS_PATH   — manual batch-indexing document directory
 """
 
 import os
@@ -20,7 +19,6 @@ DATA_DIR = PROJECT_ROOT / "data"
 CONFIG_PATH = Path(
     os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config" / "watcher_config.container.yaml"))
 )
-DOCS_PATH = PROJECT_ROOT / "documents"
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
@@ -32,7 +30,6 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # "strict"    — answer only from retrieved context; refuse if nothing found
 # "augmented" — use context when found, fall back to model knowledge otherwise
 RAG_MODE: RagMode = cast(RagMode, os.environ.get("RAG_MODE", "augmented"))
-MMR_ENABLED = os.environ.get("MMR_ENABLED", "true").lower() != "false"
 RAG_TIMING = os.environ.get("RAG_TIMING", "").lower() in ("1", "true")
 API_KEY = os.environ.get("API_KEY", "")
 SESSION_EXPIRY_HOURS = int(os.environ.get("SESSION_EXPIRY_HOURS", "8"))
@@ -80,15 +77,8 @@ WATCHER_POLL_INTERVAL_SECONDS = float(os.environ.get("WATCHER_POLL_INTERVAL_SECO
 
 # Retrieval pipeline
 RECALL_K = int(os.environ.get("RECALL_K", "15"))
-MMR_K = int(os.environ.get("MMR_K", "12"))
+RERANK_K = int(os.environ.get("RERANK_K", "15"))
 FINAL_K = int(os.environ.get("FINAL_K", "4"))
-MMR_LAMBDA_MULT = float(os.environ.get("MMR_LAMBDA_MULT", "0.7"))
-KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "30"))
-KEYWORD_SEARCH_ENABLED = os.environ.get("KEYWORD_SEARCH_ENABLED", "true").lower() != "false"
-KEYWORD_INDEX_MAX_DOCS = int(os.environ.get("KEYWORD_INDEX_MAX_DOCS", "100000"))
-KEYWORD_INDEX_MAX_TOKENS = int(os.environ.get("KEYWORD_INDEX_MAX_TOKENS", "5000000"))
-KEYWORD_MIN_QUERY_TOKENS = int(os.environ.get("KEYWORD_MIN_QUERY_TOKENS", "1"))
-KEYWORD_MAX_QUERY_TOKENS = int(os.environ.get("KEYWORD_MAX_QUERY_TOKENS", "32"))
 MAX_CHUNK_CHARS = int(os.environ.get("MAX_CHUNK_CHARS", "2000"))
 MAX_MD_CHUNK = MAX_CHUNK_CHARS  # intentionally aliased — both chunkers enforce the same limit
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))
@@ -118,13 +108,8 @@ def _validate_settings() -> None:
         "RATE_MAX_LOGIN_REQUESTS": RATE_MAX_LOGIN_REQUESTS,
         "OLLAMA_NUM_CTX": OLLAMA_NUM_CTX,
         "RECALL_K": RECALL_K,
-        "MMR_K": MMR_K,
+        "RERANK_K": RERANK_K,
         "FINAL_K": FINAL_K,
-        "KEYWORD_REFRESH_INTERVAL": KEYWORD_REFRESH_INTERVAL,
-        "KEYWORD_INDEX_MAX_DOCS": KEYWORD_INDEX_MAX_DOCS,
-        "KEYWORD_INDEX_MAX_TOKENS": KEYWORD_INDEX_MAX_TOKENS,
-        "KEYWORD_MIN_QUERY_TOKENS": KEYWORD_MIN_QUERY_TOKENS,
-        "KEYWORD_MAX_QUERY_TOKENS": KEYWORD_MAX_QUERY_TOKENS,
         "MAX_CHUNK_CHARS": MAX_CHUNK_CHARS,
         "CHUNK_SIZE": CHUNK_SIZE,
         "MAX_CHAT_MESSAGES": MAX_CHAT_MESSAGES,
@@ -160,19 +145,8 @@ def _validate_settings() -> None:
         raise ValueError(
             f"settings: MAX_CHUNK_CHARS must be >= CHUNK_SIZE, got {MAX_CHUNK_CHARS} < {CHUNK_SIZE}"
         )
-    if not 0.0 <= MMR_LAMBDA_MULT <= 1.0:
-        raise ValueError(
-            f"settings: MMR_LAMBDA_MULT must be between 0.0 and 1.0, got {MMR_LAMBDA_MULT}"
-        )
-    if FINAL_K > MMR_K:
-        raise ValueError(f"settings: FINAL_K must be <= MMR_K, got {FINAL_K} > {MMR_K}")
-    if MMR_K > RECALL_K:
-        raise ValueError(f"settings: MMR_K must be <= RECALL_K, got {MMR_K} > {RECALL_K}")
-    if KEYWORD_MIN_QUERY_TOKENS > KEYWORD_MAX_QUERY_TOKENS:
-        raise ValueError(
-            "settings: KEYWORD_MIN_QUERY_TOKENS must be <= KEYWORD_MAX_QUERY_TOKENS, "
-            f"got {KEYWORD_MIN_QUERY_TOKENS} > {KEYWORD_MAX_QUERY_TOKENS}"
-        )
+    if FINAL_K > RERANK_K:
+        raise ValueError(f"settings: FINAL_K must be <= RERANK_K, got {FINAL_K} > {RERANK_K}")
     if MAX_CHAT_QUESTION_CHARS > MAX_CHAT_TOTAL_CHARS:
         raise ValueError(
             "settings: MAX_CHAT_QUESTION_CHARS must be <= MAX_CHAT_TOTAL_CHARS, "

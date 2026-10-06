@@ -4,21 +4,23 @@ from unittest.mock import MagicMock
 
 
 def test_embed_passes_configured_timeout_to_http_call(monkeypatch):
-    """embed() must forward OLLAMA_EMBED_TIMEOUT_SECONDS to the Ollama HTTP call."""
+    """embed() must use the batch endpoint, embed the text as-is, and forward the timeout."""
     from api.embed import embed
     from settings import OLLAMA_EMBED_TIMEOUT_SECONDS
 
     captured = {}
 
     def fake_post_with_retry(path, **kwargs):
-        captured["timeout"] = kwargs.get("timeout")
+        captured.update(path=path, timeout=kwargs.get("timeout"), json=kwargs.get("json"))
         resp = MagicMock()
-        resp.json.return_value = {"embedding": [0.1] * 768}
+        resp.json.return_value = {"embeddings": [[0.1] * 768]}
         return resp
 
     monkeypatch.setattr("api.embed.ollama_client.post_with_retry", fake_post_with_retry)
-    embed("hello world")
+    assert len(embed("hello world")) == 768
+    assert captured["path"] == "/api/embed"
     assert captured["timeout"] == OLLAMA_EMBED_TIMEOUT_SECONDS
+    assert captured["json"]["input"] == ["hello world"]  # no task prefix (see api/embed.py)
 
 
 def test_embed_batch_passes_configured_timeout_to_http_call(monkeypatch):
@@ -141,18 +143,21 @@ def test_warm_models_passes_configured_timeout(monkeypatch):
     import asyncio
 
     import web.api_server as srv
-    from settings import OLLAMA_WARMUP_TIMEOUT_SECONDS
+    from settings import OLLAMA_NUM_CTX, OLLAMA_WARMUP_TIMEOUT_SECONDS
 
     captured = {}
 
-    def fake_post(path, **kwargs):
+    def fake_post_with_retry(path, **kwargs):
         if path == "/api/generate":
-            captured["timeout"] = kwargs.get("timeout")
+            captured.update(timeout=kwargs.get("timeout"), json=kwargs.get("json"))
         raise RuntimeError("suppressed by _warm_one try/except")
 
-    monkeypatch.setattr(srv.ollama_client, "post", fake_post)
+    monkeypatch.setattr(srv.ollama_client, "post_with_retry", fake_post_with_retry)
     asyncio.run(srv._warm_models())
     assert captured.get("timeout") == OLLAMA_WARMUP_TIMEOUT_SECONDS
+    # An empty prompt loads the model only; num_ctx must match real requests to avoid a reload.
+    assert captured["json"]["prompt"] == ""
+    assert captured["json"]["options"]["num_ctx"] == OLLAMA_NUM_CTX
 
 
 def test_model_warmup_is_opt_in_by_default():

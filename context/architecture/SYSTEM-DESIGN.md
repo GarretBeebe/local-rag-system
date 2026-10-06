@@ -83,7 +83,7 @@ The retrieval system is designed as a **multi-stage pipeline**.
 
 Pipeline:
 
-query ↓ embedding ↓ hybrid retrieval ↓ MMR diversification ↓
+query ↓ embedding ↓ hybrid retrieval ↓ rank fusion ↓
 cross-encoder reranking ↓ context selection
 
 Each stage improves retrieval quality.
@@ -163,21 +163,18 @@ query and candidate documents.
 
 ------------------------------------------------------------------------
 
-# Why MMR Diversification
+# Why Rank Fusion Instead of MMR
 
-Vector search often returns many near-duplicate chunks.
+The system previously applied Maximal Marginal Relevance (MMR) before the
+reranker. The cross-encoder ranks purely by relevance, so it re-selected the
+near-duplicates MMR tried to push down, and keyword results bypassed MMR
+entirely.
 
-Example:
+Reciprocal Rank Fusion is simpler and fits the pipeline better:
 
-Multiple segments from the same document.
-
-Maximal Marginal Relevance (MMR) improves results by:
-
--   penalizing redundant results
--   increasing topical diversity
--   improving context coverage
-
-This produces a more useful context window for the language model.
+-   one ranked list from both searches, favouring chunks both agree on
+-   exact-duplicate chunks (same file indexed twice) removed before reranking
+-   a fixed, smaller candidate set for the reranker (faster)
 
 ------------------------------------------------------------------------
 
@@ -276,7 +273,7 @@ The system combines several modern RAG design patterns:
 
 hybrid retrieval\
 chunked document indexing\
-MMR diversification\
+reciprocal rank fusion\
 cross-encoder reranking\
 local LLM generation
 

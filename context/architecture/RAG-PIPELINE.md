@@ -14,14 +14,14 @@ a local language model.
 The system uses a multi-stage architecture:
 
 user question ↓ query embedding ↓ hybrid retrieval ├─ vector similarity
-search └─ BM25 keyword search ↓ MMR diversification ↓ cross-encoder
+search └─ BM25 keyword search ↓ rank fusion ↓ cross-encoder
 reranking ↓ context assembly ↓ LLM generation ↓ answer with citations
 
 ------------------------------------------------------------------------
 
 # Stage 1 --- Document Processing
 
-Documents placed in the `documents/` directory are processed by the
+The filesystem watcher feeds files from the configured folders into the
 ingestion pipeline.
 
 ## Flow
@@ -33,10 +33,9 @@ vector database storage
 
 Documents are split into overlapping segments to improve retrieval.
 
-Example configuration:
-
-chunk_size = 500\
-chunk_overlap = 100
+Python and Markdown split at structural boundaries (top-level definitions,
+header sections) and pack small neighbouring pieces up to `CHUNK_SIZE` (500);
+other files use 500-character windows with 100 characters of overlap.
 
 Chunking improves:
 
@@ -127,19 +126,20 @@ Hybrid retrieval improves recall for technical documents.
 
 ------------------------------------------------------------------------
 
-# Stage 6 --- Diversification (MMR)
+# Stage 6 --- Rank Fusion
 
-Maximal Marginal Relevance (MMR) reduces redundancy.
+Reciprocal Rank Fusion (RRF) merges the vector and keyword lists into one
+ranking.
 
 Goals:
 
--   avoid repeated chunks
--   increase topic diversity
--   improve context coverage
+-   favour chunks both searches agree on
+-   drop exact-duplicate chunks (the same file indexed twice)
+-   hand the reranker a fixed, small candidate set (`RERANK_K`)
 
 Example:
 
-vector results → filtered to remove near‑duplicates.
+vector top 15 + keyword top 15 → fused and deduplicated → top 15 reranked.
 
 ------------------------------------------------------------------------
 
@@ -201,7 +201,7 @@ source references
 
 documents ↓ chunking ↓ embedding generation ↓ vector database
 
-user question ↓ query embedding ↓ hybrid retrieval ↓ MMR diversification
+user question ↓ query embedding ↓ hybrid retrieval ↓ rank fusion
 ↓ cross‑encoder reranking ↓ context assembly ↓ LLM generation ↓ answer
 
 ------------------------------------------------------------------------

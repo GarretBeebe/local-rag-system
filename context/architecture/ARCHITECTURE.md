@@ -22,7 +22,7 @@ Query Service\
 │ ├── Vector search (semantic)\
 │ └── Keyword search (BM25)\
 │\
-├── Diversification (MMR)\
+├── Rank fusion + duplicate removal\
 │\
 ├── Cross-encoder reranking\
 │\
@@ -54,7 +54,7 @@ similarity search.
 Stages:
 
 1.  Hybrid Recall (vector + keyword)
-2.  Diversification (MMR)
+2.  Rank fusion (RRF) + duplicate removal
 3.  Cross-encoder reranking
 
 ## Data Flow
@@ -65,7 +65,7 @@ filesystem → loader → chunker → embedding → vector DB
 
 ### Query
 
-query → embedding → hybrid retrieval → MMR → reranking → prompt → LLM
+query → embedding → hybrid retrieval → rank fusion → reranking → prompt → LLM
 
 ## Design Principles
 

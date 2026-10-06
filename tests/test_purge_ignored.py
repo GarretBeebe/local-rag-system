@@ -69,7 +69,7 @@ def test_accessible_root_only_evaluates_files_under_it(monkeypatch, tmp_path):
     assert inside in result
 
 
-def test_apply_bumps_index_version_once_when_paths_removed(monkeypatch, tmp_path):
+def test_apply_removes_ignored_paths(monkeypatch, tmp_path):
     root = tmp_path / "docs"
     root.mkdir()
     ignored = str(root / "note.ignored_ext")
@@ -77,30 +77,27 @@ def test_apply_bumps_index_version_once_when_paths_removed(monkeypatch, tmp_path
     config_path.write_text(f"watch_paths:\n  - path: {root}\n")
 
     deleted = []
-    bumps = []
     monkeypatch.setattr("ingest.purge_ignored.init_db", lambda: None)
     monkeypatch.setattr("ingest.purge_ignored.list_all_paths", lambda: [ignored])
     monkeypatch.setattr("ingest.purge_ignored.is_indexable_path", lambda *a, **kw: False)
     monkeypatch.setattr("ingest.purge_ignored.remove_indexed_document", lambda p: deleted.append(p))
-    monkeypatch.setattr("ingest.purge_ignored.bump_index_version", lambda: bumps.append(True))
 
     assert purge_ignored(config_path, apply=True) == 1
     assert deleted == [ignored]
-    assert bumps == [True]
 
 
-def test_dry_run_does_not_bump_index_version(monkeypatch, tmp_path):
+def test_dry_run_removes_nothing(monkeypatch, tmp_path):
     root = tmp_path / "docs"
     root.mkdir()
     ignored = str(root / "note.ignored_ext")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(f"watch_paths:\n  - path: {root}\n")
 
-    bumps = []
+    deleted = []
     monkeypatch.setattr("ingest.purge_ignored.init_db", lambda: None)
     monkeypatch.setattr("ingest.purge_ignored.list_all_paths", lambda: [ignored])
     monkeypatch.setattr("ingest.purge_ignored.is_indexable_path", lambda *a, **kw: False)
-    monkeypatch.setattr("ingest.purge_ignored.bump_index_version", lambda: bumps.append(True))
+    monkeypatch.setattr("ingest.purge_ignored.remove_indexed_document", lambda p: deleted.append(p))
 
     assert purge_ignored(config_path, apply=False) == 1
-    assert bumps == []
+    assert deleted == []

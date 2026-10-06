@@ -26,8 +26,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
 from common.config import load_yaml_config
-from common.index_state import bump_index_version
-from common.index_state import init_db as init_index_state
+from common.log_config import configure_logging
 from common.paths import (
     is_indexable_path,
     matches_ignore_pattern,
@@ -40,10 +39,6 @@ from ingest.cleanup_stale import cleanup_stale
 from ingest.index_documents import index_file, remove_indexed_document
 from settings import ALLOWED_EXTENSIONS, CONFIG_PATH, WATCHER_POLL_INTERVAL_SECONDS
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 _MAIN_LOOP_SLEEP_SECONDS = 5
@@ -82,13 +77,11 @@ def _index_if_changed(path: str) -> IndexDecision:
         outcome = index_file(p)
         if outcome == IndexDecision.INDEXED:
             upsert_hash(path, file_hash)
-            bump_index_version()
             return IndexDecision.INDEXED
         if outcome == IndexDecision.SKIPPED:
             if prev_hash is not None:
                 logger.info("Removing stale vectors for %s (now unindexable)", path)
                 remove_indexed_document(path)
-                bump_index_version()
             else:
                 logger.info("Skipped %s (never indexed)", path)
             return IndexDecision.SKIPPED
@@ -176,7 +169,6 @@ class WatchHandler(FileSystemEventHandler):
         normalized_path = normalize_path(event.src_path)
         try:
             remove_indexed_document(normalized_path)
-            bump_index_version()
         except Exception as e:
             logger.error("Failed to remove deleted file %s: %s", normalized_path, e)
 
@@ -245,6 +237,7 @@ def initial_scan(
 
 
 def main() -> None:
+    configure_logging()
     try:
         config = load_config()
         required_mount_roots = validate_required_mounts(config.get("required_mounts", []))
@@ -253,7 +246,6 @@ def main() -> None:
         sys.exit(1)
 
     init_db()
-    init_index_state()
     worker = IndexWorker()
 
     watch_path_pairs = list(_iter_watch_paths(config["watch_paths"]))

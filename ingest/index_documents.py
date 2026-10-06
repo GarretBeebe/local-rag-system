@@ -2,13 +2,10 @@
 Document ingestion pipeline: loads files, splits them into overlapping chunks,
 generates embeddings via Ollama, and upserts the results into Qdrant.
 
-Exposes public functions used by the filesystem watcher:
+Exposes public functions used by the filesystem watcher (the only ingestion path):
   - index_file(path)                — chunk, embed, and upsert a single file
   - remove_indexed_document(path)   — delete vectors and fingerprint for a file
   - delete_document(filepath)       — remove only Qdrant vectors for a file
-
-Can also be run directly as a script to batch-index the documents directory:
-  python ingest/index_documents.py
 """
 
 import logging
@@ -21,27 +18,22 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
+    Modifier,
+    PayloadSchemaType,
     PointStruct,
+    SparseVectorParams,
     VectorParams,
 )
-from tqdm import tqdm
 
 from api.embed import embed_batch
-from common.paths import has_allowed_extension, normalize_extensions, normalize_path
-from common.qdrant import get_qdrant_client
+from common.paths import normalize_path
+from common.qdrant import DENSE_VECTOR, SPARSE_VECTOR, bm25_document, get_qdrant_client
 from common.types import IndexDecision
 from indexer.fingerprint_store import delete_hash
 from ingest.chunkers import chunk_document
-from settings import (
-    ALLOWED_EXTENSIONS,
-    COLLECTION,
-    DOCS_PATH,
-    MAX_FILE_SIZE,
-    VECTOR_SIZE,
-)
+from settings import COLLECTION, MAX_FILE_SIZE, VECTOR_SIZE
 
 logger = logging.getLogger(__name__)
-_ALLOWED_EXTENSIONS = normalize_extensions(ALLOWED_EXTENSIONS)
 _collection_ensured: bool = False
 
 
@@ -54,12 +46,29 @@ def ensure_collection() -> None:
     if _collection_ensured:
         return
     client = get_qdrant_client()
-    if not client.collection_exists(COLLECTION):
+    if client.collection_exists(COLLECTION):
+        sparse = client.get_collection(COLLECTION).config.params.sparse_vectors or {}
+        if SPARSE_VECTOR not in sparse:
+            raise RuntimeError(
+                f"Collection {COLLECTION!r} predates the dense + BM25 vector layout; "
+                "run ingest.reset_collection to rebuild it"
+            )
+    else:
         logger.info("Collection missing — creating new collection")
         client.create_collection(
             collection_name=COLLECTION,
-            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            vectors_config={DENSE_VECTOR: VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)},
+            # IDF is computed by Qdrant from collection statistics at query time.
+            sparse_vectors_config={SPARSE_VECTOR: SparseVectorParams(modifier=Modifier.IDF)},
         )
+        # Qdrant recommends indexing filter fields before points arrive: stale-vector deletes
+        # match on filepath, and filename-aware retrieval filters on filename.
+        for field_name in ("filepath", "filename"):
+            client.create_payload_index(
+                collection_name=COLLECTION,
+                field_name=field_name,
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
     _collection_ensured = True
 
 
@@ -82,28 +91,22 @@ def _embed_chunks(
 ) -> list[PointStruct]:
     """Embed each chunk and return PointStructs with metadata."""
     vectors = embed_batch(chunks)
-    if len(vectors) != len(chunks):
-        raise RuntimeError(f"Expected {len(chunks)} embeddings, got {len(vectors)}")
-
-    points = []
-    for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True)):
-        points.append(
-            PointStruct(
-                id=str(uuid.uuid4()),
-                vector=vec,
-                payload={
-                    "text": chunk,
-                    "document_id": document_id,
-                    "filename": path.name,
-                    "filepath": filepath,
-                    "chunk_index": i,
-                    "chunk_total": 0,  # corrected below once all chunks are embedded
-                },
-            )
+    return [
+        PointStruct(
+            id=str(uuid.uuid4()),
+            # The filename is part of the BM25 text so filename queries match keywords too.
+            vector={DENSE_VECTOR: vec, SPARSE_VECTOR: bm25_document(f"{path.name} {chunk}")},
+            payload={
+                "text": chunk,
+                "document_id": document_id,
+                "filename": path.name,
+                "filepath": filepath,
+                "chunk_index": i,
+                "chunk_total": len(chunks),
+            },
         )
-    for p in points:
-        p.payload["chunk_total"] = len(points)
-    return points
+        for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True))
+    ]
 
 
 def _upsert_chunks(filepath: str, points: list[PointStruct]) -> IndexDecision:
@@ -111,7 +114,6 @@ def _upsert_chunks(filepath: str, points: list[PointStruct]) -> IndexDecision:
     index_version = str(uuid.uuid4())
     for p in points:
         p.payload["index_version"] = index_version
-        p.payload["active"] = True
     client = get_qdrant_client()
     try:
         client.upsert(collection_name=COLLECTION, points=points)
@@ -170,10 +172,6 @@ def index_file(path: Path) -> IndexDecision:
         return IndexDecision.FAILED
     elapsed["embed"] = time.monotonic() - t0
 
-    if not points:
-        logger.warning("No valid chunks to index for %s", path)
-        return IndexDecision.FAILED
-
     t0 = time.monotonic()
     result = _upsert_chunks(normalized_path, points)
     elapsed["upsert"] = time.monotonic() - t0
@@ -198,22 +196,3 @@ def remove_indexed_document(filepath: Path | str) -> None:
     normalized_path = normalize_path(filepath)
     delete_document(normalized_path)
     delete_hash(normalized_path)
-
-
-def main() -> None:
-    files = [
-        p
-        for p in DOCS_PATH.rglob("*")
-        if p.is_file() and has_allowed_extension(p, _ALLOWED_EXTENSIONS)
-    ]
-    print(f"Found {len(files)} files to index")
-
-    if not files:
-        return
-
-    for f in tqdm(files):
-        index_file(f)
-
-
-if __name__ == "__main__":
-    main()

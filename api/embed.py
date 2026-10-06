@@ -1,14 +1,13 @@
 """
 Shared embedding helper used by both the retrieval pipeline and the ingest pipeline.
 
-Kept separate from api.retrieval to avoid loading heavy ML models (CrossEncoder,
-KeywordIndex) in contexts that only need embedding (e.g. batch indexing).
+Kept separate from api.retrieval to avoid loading heavy ML models (the CrossEncoder)
+in contexts that only need embedding (e.g. the watcher).
 
-Batch embedding: the Ollama /api/embeddings endpoint used here does not support
-batch input (it takes a single "prompt" string). Ollama 0.1.25+ added /api/embed
-which accepts {"model": ..., "input": [text1, text2, ...]}. If the deployment
-upgrades Ollama, add embed_batch() using /api/embed and update index_documents.py
-to batch embed all chunks per file in one request.
+Texts are embedded as-is, without the "search_query: " / "search_document: " prefixes
+the nomic-embed-text model card asks for: on this corpus they lowered retrieval quality
+(scripts/eval_retrieval.py, 2026-10-06: hit@4 0.95 without vs 0.90 with). Re-measure
+before adding them; changing embedding inputs requires a full reindex.
 """
 
 import logging
@@ -29,36 +28,6 @@ def _prepare_text(text: str) -> str:
         )
         text = text[:MAX_EMBED_CHARS]
     return text
-
-
-def _validate_vector(vector: list[float], model: str = EMBED_MODEL) -> list[float]:
-    if len(vector) != VECTOR_SIZE:
-        raise RuntimeError(
-            f"Embedding model {model!r} returned {len(vector)} dimensions; "
-            f"configured VECTOR_SIZE is {VECTOR_SIZE}"
-        )
-    return vector
-
-
-def embed(text: str) -> list[float]:
-    """Return an embedding vector for the given text via the Ollama embeddings API."""
-    text = _prepare_text(text)
-
-    response = ollama_client.post_with_retry(
-        "/api/embeddings",
-        json={"model": EMBED_MODEL, "prompt": text},
-        timeout=OLLAMA_EMBED_TIMEOUT_SECONDS,
-    )
-
-    try:
-        data = response.json()
-    except ValueError as e:
-        raise RuntimeError(f"Embedding service returned invalid JSON: {e}") from e
-
-    if "embedding" not in data:
-        raise RuntimeError("Embedding response missing 'embedding' field")
-
-    return _validate_vector(data["embedding"])
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
@@ -86,4 +55,15 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
         raise RuntimeError(
             f"Batch embedding returned {len(vectors)} vectors for {len(prepared)} texts"
         )
-    return [_validate_vector(vector) for vector in vectors]
+    for vector in vectors:
+        if len(vector) != VECTOR_SIZE:
+            raise RuntimeError(
+                f"Embedding model {EMBED_MODEL!r} returned {len(vector)} dimensions; "
+                f"configured VECTOR_SIZE is {VECTOR_SIZE}"
+            )
+    return vectors
+
+
+def embed(text: str) -> list[float]:
+    """Return an embedding vector for one text (a search question)."""
+    return embed_batch([text])[0]

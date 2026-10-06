@@ -32,10 +32,10 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles
 
 import api.ollama_client as ollama_client
-import api.retrieval
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import Chunk, rerank, retrieve_best
+from common.log_config import configure_logging
 from common.types import RagMode
 from settings import (
     ALLOW_INSECURE_LOCALONLY,
@@ -114,6 +114,7 @@ def _get_rag_concurrency() -> asyncio.Semaphore:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _RAG_EXECUTOR, _RAG_CONCURRENCY
+    configure_logging()  # uvicorn only configures its own loggers
     _RAG_EXECUTOR = ThreadPoolExecutor(max_workers=RAG_EXECUTOR_WORKERS)
     _RAG_CONCURRENCY = asyncio.Semaphore(RAG_CONCURRENCY_LIMIT)
 
@@ -122,7 +123,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         user_store.purge_expired_sessions()
     except Exception as exc:
         logger.warning("Failed to purge expired sessions on startup: %s", exc)
-    api.retrieval.startup()
 
     if ALLOW_INSECURE_LOCALONLY:
         logger.warning(
@@ -144,7 +144,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for t in sweep_tasks:
             with suppress(asyncio.CancelledError):
                 await t
-        api.retrieval.shutdown()
         futs = [
             _get_rag_executor().submit(ollama_client.close_session)
             for _ in range(RAG_EXECUTOR_WORKERS)
@@ -166,10 +165,6 @@ def _extract_bearer_token(request: Request) -> str:
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next: Callable[..., Any]) -> Response:
-    request_id = uuid.uuid4().hex[:12]
-    request.state.request_id = request_id
-    logger.info("[%s] %s %s", request_id, request.method, request.url.path)
-
     if request.url.path == "/favicon.ico" or request.url.path.startswith("/ui"):
         return await call_next(request)
     if request.url.path == "/healthz":
@@ -310,30 +305,28 @@ async def _start_stream_worker(
     by the time this runs inside a StreamingResponse generator.
     """
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue(maxsize=32)
+    # Unbounded, and fed without waiting: the worker must never block on a stream nobody is
+    # reading (client gone, event loop shutting down), or it would pin its thread and RAG slot
+    # forever. One LLM answer is all that can accumulate, so the buffer stays small.
+    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
     cancel_event = threading.Event()
+
+    def _send(item: str | Exception | None) -> bool:
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+        except RuntimeError:  # event loop closed; nobody is listening anymore
+            return False
+        return True
 
     def _run():
         try:
             for text in ask_stream_sync(question, model, rag_mode, cancel_event):
-                coro = queue.put(text)
-                try:
-                    asyncio.run_coroutine_threadsafe(coro, loop).result()
-                except RuntimeError:
-                    coro.close()  # loop closed; prevent "coroutine never awaited" warning
+                if not _send(text):
                     return
         except Exception as exc:
-            coro = queue.put(exc)
-            try:
-                asyncio.run_coroutine_threadsafe(coro, loop).result()
-            except RuntimeError:
-                coro.close()
+            _send(exc)
         finally:
-            coro = queue.put(None)
-            try:
-                asyncio.run_coroutine_threadsafe(coro, loop).result()
-            except RuntimeError:
-                coro.close()
+            _send(None)
 
     started = time.monotonic()
     semaphore = await _wait_for_capacity(RAG_REQUEST_TIMEOUT_SECONDS)
@@ -552,12 +545,10 @@ async def _warm_one(name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
 async def _warm_models() -> None:
     logger.info("Warming RAG models...")
     await asyncio.gather(
+        # generate() sends the same num_ctx as real requests (a mismatch makes Ollama reload
+        # the model), and an empty prompt only loads the model without generating.
         _warm_one(
-            "LLM",
-            ollama_client.post,
-            "/api/generate",
-            json={"model": GEN_MODEL, "prompt": "warmup", "stream": False},
-            timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS,
+            "LLM", ollama_client.generate, "", GEN_MODEL, timeout=OLLAMA_WARMUP_TIMEOUT_SECONDS
         ),
         _warm_one("Embedding model", embed, "warmup"),
         _warm_one(

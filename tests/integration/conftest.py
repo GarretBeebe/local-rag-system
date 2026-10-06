@@ -24,8 +24,8 @@ def require_qdrant():
 
 @pytest.fixture
 def fake_embed(monkeypatch):
-    """Replace embed() with a deterministic stub so tests don't need Ollama."""
+    """Replace embed_batch() with a deterministic stub so tests don't need Ollama."""
     monkeypatch.setattr(
-        "ingest.index_documents.embed",
-        lambda text: [0.1] * 768,
+        "ingest.index_documents.embed_batch",
+        lambda texts: [[0.1] * 768 for _ in texts],
     )

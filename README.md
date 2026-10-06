@@ -42,8 +42,7 @@ Hybrid --> KeywordSearch
 VectorSearch --> Merge
 KeywordSearch --> Merge
 
-Merge --> MMR[MMR Diversification]
-MMR --> Rerank[Cross Encoder Reranking]
+Merge[Rank Fusion + Dedupe] --> Rerank[Cross Encoder Reranking]
 
 Rerank --> Prompt[Context + Question]
 Prompt --> LLM[Local LLM]
@@ -93,8 +92,7 @@ The ingestion pipeline supports:
     │   ├── embed.py             ← shared embedding helper (ingest + retrieval)
     │   ├── ollama_client.py     ← per-thread Ollama HTTP sessions
     │   ├── query_rag.py
-    │   ├── retrieval.py
-    │   └── keyword_index.py
+    │   └── retrieval.py
     │
     ├── ingest/
     │   ├── chunkers.py
@@ -118,7 +116,8 @@ The ingestion pipeline supports:
     │   └── users.sqlite3            ← web UI user credentials
     │
     ├── scripts/
-    │   └── smoke_rag.py             ← end-to-end smoke test (requires live services)
+    │   ├── benchmark_rag.py         ← end-to-end query latency benchmark
+    │   └── eval_retrieval.py        ← retrieval quality eval (hit@k, MRR, latency)
     │
     ├── tests/
     │   ├── conftest.py              ← session-wide mocks for unit tests
@@ -338,13 +337,10 @@ the relevant container (`api` or `watcher`).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `RAG_TIMING` | `0` | Set to `1` to log per-stage timings (embed, recall, rerank, generate) on every request |
-| `MMR_ENABLED` | `true` | Set to `false` to skip MMR diversification; reduces payload size and CPU work |
+| `RAG_TIMING` | `0` | Set to `1` to log per-stage timings (embed, recall, rerank, generate) and Ollama's model-load/prefill time on every request |
 | `RECALL_K` | `15` | Number of candidates fetched from Qdrant and BM25 before reranking |
-| `MMR_K` | `12` | Number of candidates kept after MMR diversification |
+| `RERANK_K` | `15` | Number of fused candidates the cross-encoder reranks (must be >= `FINAL_K`) |
 | `FINAL_K` | `4` | Number of chunks passed to the LLM after reranking |
-| `MMR_LAMBDA_MULT` | `0.7` | MMR trade-off: 1.0 = pure relevance, 0.0 = pure diversity |
-| `KEYWORD_REFRESH_INTERVAL` | `30` | Seconds between cheap checks for watcher-indexed changes; BM25 rebuilds only when indexed content changed |
 | `MAX_CHUNK_CHARS` | `2000` | Maximum characters per chunk for all chunkers (text, Python, Markdown) |
 
 Enable timing to identify which pipeline stage dominates latency:
@@ -379,17 +375,25 @@ Enable timing to identify which pipeline stage dominates latency:
 
 # Document Ingestion
 
-Manual indexing
+The watcher is the only ingestion path: it indexes the folders in
+`config/watcher_config.container.yaml` and keeps them in sync.
 
-    docker exec rag-api python ingest/index_documents.py
+Reset and rebuild the collection (also clears the fingerprint store). This is
+required once when upgrading to the dense + BM25 collection layout: the watcher
+refuses an older collection with an error naming `ingest.reset_collection`, and
+queries fail until the rebuild finishes. Stop the watcher first: a running watcher remembers the old collection and would fail
+every write after the reset, and only a restart triggers a full re-scan.
 
-Reset collection (also clears the fingerprint store so the watcher re-indexes from scratch)
+    docker compose stop watcher
+    docker compose run --rm --no-deps watcher python -m ingest.reset_collection
+    docker compose up -d watcher
 
-    docker exec rag-api python ingest/reset_collection.py
+The watcher recreates the collection (with payload indexes) and re-indexes
+everything; the initial scan only queues files, so wait for the Qdrant point
+count to stop changing before relying on results.
 
-To delete vectors only and leave fingerprints intact:
-
-    docker exec rag-api python ingest/reset_collection.py --vectors-only
+To delete vectors only and leave fingerprints intact, add `--vectors-only` to
+the reset command.
 
 ------------------------------------------------------------------------
 
@@ -546,11 +550,10 @@ Chatbox configuration
 The query pipeline runs these stages in sequence:
 
 1.  Query embedding (Ollama)
-2.  Hybrid recall — Qdrant vector search + BM25 keyword search
-3.  Deduplication by point ID
-4.  MMR diversification (optional, see `MMR_ENABLED`)
-5.  Cross-encoder reranking (CPU)
-6.  Prompt assembly and LLM generation (Ollama, streamed)
+2.  Hybrid recall — Qdrant vector search + Qdrant BM25 keyword search (sparse vectors)
+3.  Reciprocal Rank Fusion of both lists; chunks with identical text count once
+4.  Cross-encoder reranking of the top `RERANK_K` (CPU)
+5.  Prompt assembly and LLM generation (Ollama, streamed)
 
 Implemented latency improvements:
 
@@ -558,12 +561,12 @@ Implemented latency improvements:
 | --- | --- |
 | True Ollama streaming | First token delivered as generation starts, not after full completion |
 | Per-thread HTTP sessions | One `requests.Session` per RAG worker thread — TCP connections to Ollama reused without contention |
-| BM25 `heapq.nlargest` | Partial top-k sort replaces full O(n log n) sort on every query |
-| Zero-score BM25 filter | Irrelevant keyword results excluded before reranking |
-| Candidate deduplication | Vector and keyword overlap removed before cross-encoder |
+| Keyword search in Qdrant | BM25 sparse vectors are built by Qdrant as chunks are indexed: no in-process copy of the corpus, no full rebuilds on every file change, no refresh lag |
+| Rank fusion + text dedupe | Vector and keyword lists merged by RRF; exact-duplicate chunks (same file indexed twice) removed before the cross-encoder |
+| Reranker batch size 8 | Length-sorted small batches avoid padding waste (~2.4x faster reranking) |
 | Reduced default candidate counts | recall\_k 30→15, mmr\_k 10→8, final\_k 6→4 |
-| Optional MMR disable | `MMR_ENABLED=false` skips vector fetch and cosine work entirely |
-| Per-stage timing | `RAG_TIMING=1` logs each stage's wall time for profiling |
+| MMR removed | Its diversity was undone by the relevance-only reranker; dropping it removed 46 ms of Python per query and the vector fetch |
+| Per-stage timing | `RAG_TIMING=1` logs each stage's wall time, plus Ollama's model-load and prompt-prefill time per answer |
 
 ------------------------------------------------------------------------
 
@@ -668,9 +671,11 @@ if unavailable):
 
     .venv/bin/python -m pytest tests/ -m integration -q
 
-End-to-end smoke test (requires both Qdrant and Ollama):
+Retrieval quality eval (requires the running stack; questions live in the
+gitignored `scripts/eval_questions.yaml`, format in the script docstring):
 
-    .venv/bin/python scripts/smoke_rag.py
+    docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts:ro" api \
+        python -m scripts.eval_retrieval
 
 Lint:
 
