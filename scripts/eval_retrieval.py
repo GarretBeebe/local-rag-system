@@ -26,7 +26,6 @@ from typing import Any
 
 import yaml
 
-import api.retrieval
 from api.retrieval import Chunk, retrieve_best
 from settings import FINAL_K
 
@@ -47,23 +46,19 @@ def _rank(chunks: list[Chunk], item: dict[str, Any]) -> int | None:
 
 def main() -> None:
     questions = yaml.safe_load(_QUESTIONS_PATH.read_text())
-    api.retrieval.startup()
     ranks: list[int | None] = []
     latencies: list[float] = []
     context_chars: list[int] = []
-    try:
-        for i, item in enumerate(questions):
-            start = time.perf_counter()
-            chunks = retrieve_best(item["q"], final_k=_TOP_K)
-            elapsed = time.perf_counter() - start
-            if i:  # the first query also pays for loading the reranker model
-                latencies.append(elapsed)
-            rank = _rank(chunks, item)
-            ranks.append(rank)
-            context_chars.append(sum(len(c.payload.get("text", "")) for c in chunks[:FINAL_K]))
-            print(f"{rank or '-':>3}  {elapsed * 1000:6.0f} ms  {item['q']}")
-    finally:
-        api.retrieval.shutdown()
+    for i, item in enumerate(questions):
+        start = time.perf_counter()
+        chunks = retrieve_best(item["q"], final_k=_TOP_K)
+        elapsed = time.perf_counter() - start
+        if i:  # the first query also pays for loading the reranker model
+            latencies.append(elapsed)
+        rank = _rank(chunks, item)
+        ranks.append(rank)
+        context_chars.append(sum(len(c.payload.get("text", "")) for c in chunks[:FINAL_K]))
+        print(f"{rank or '-':>3}  {elapsed * 1000:6.0f} ms  {item['q']}")
 
     def hit_rate(k: int) -> float:
         return sum(1 for r in ranks if r is not None and r <= k) / len(ranks)

@@ -32,7 +32,6 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles
 
 import api.ollama_client as ollama_client
-import api.retrieval
 from api.embed import embed
 from api.query_rag import ask, ask_stream_sync
 from api.retrieval import Chunk, rerank, retrieve_best
@@ -129,7 +128,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         user_store.purge_expired_sessions()
     except Exception as exc:
         logger.warning("Failed to purge expired sessions on startup: %s", exc)
-    api.retrieval.startup()
 
     if ALLOW_INSECURE_LOCALONLY:
         logger.warning(
@@ -151,7 +149,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for t in sweep_tasks:
             with suppress(asyncio.CancelledError):
                 await t
-        api.retrieval.shutdown()
         futs = [
             _get_rag_executor().submit(ollama_client.close_session)
             for _ in range(RAG_EXECUTOR_WORKERS)

@@ -9,10 +9,8 @@ requires-python = ">=3.11"
 dependencies = [
     "qdrant-client",
     "sentence-transformers",
-    "rank-bm25",
     "watchdog",
     "pyyaml",
-    "tqdm",
     "requests",
     "fastapi",
     "uvicorn",

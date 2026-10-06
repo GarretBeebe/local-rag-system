@@ -58,12 +58,10 @@ def test_unchanged_hash_skips_indexing(existing_file: Path, monkeypatch) -> None
 
 
 def test_indexed_outcome_updates_fingerprint(changed_hashes: Path, monkeypatch) -> None:
-    """'indexed' outcome calls upsert_hash, bumps index version, and returns INDEXED."""
+    """'indexed' outcome calls upsert_hash and returns INDEXED."""
     monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.INDEXED)
     upserted: list[tuple[str, str]] = []
-    bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
-    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
     from indexer.watcher import _index_if_changed
 
@@ -71,7 +69,6 @@ def test_indexed_outcome_updates_fingerprint(changed_hashes: Path, monkeypatch) 
 
     assert result == IndexDecision.INDEXED
     assert upserted == [(str(changed_hashes), "new_hash")]
-    assert bumps == [True]
 
 
 def test_skipped_outcome_removes_stale_vectors_when_previously_indexed(
@@ -80,10 +77,8 @@ def test_skipped_outcome_removes_stale_vectors_when_previously_indexed(
     """Previously indexed file returning SKIPPED deletes stale vectors; fingerprint unchanged."""
     monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.SKIPPED)
     upserted: list[tuple[str, str]] = []
-    bumps: list[bool] = []
     removed: list[str] = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
-    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
     monkeypatch.setattr("indexer.watcher.remove_indexed_document", lambda p: removed.append(p))
 
     from indexer.watcher import _index_if_changed
@@ -93,7 +88,6 @@ def test_skipped_outcome_removes_stale_vectors_when_previously_indexed(
     assert result == IndexDecision.SKIPPED
     assert upserted == []
     assert removed == [str(changed_hashes)]
-    assert bumps == [True]
 
 
 def test_skipped_outcome_never_indexed_does_not_remove_document(
@@ -106,7 +100,6 @@ def test_skipped_outcome_never_indexed_does_not_remove_document(
     removed: list[str] = []
     monkeypatch.setattr("indexer.watcher.remove_indexed_document", lambda p: removed.append(p))
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: None)
-    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: None)
 
     from indexer.watcher import _index_if_changed
 
@@ -120,9 +113,7 @@ def test_failed_outcome_does_not_update_fingerprint(changed_hashes: Path, monkey
     """'failed' outcome does not call upsert_hash and returns FAILED."""
     monkeypatch.setattr("indexer.watcher.index_file", lambda p: IndexDecision.FAILED)
     upserted: list[tuple[str, str]] = []
-    bumps = []
     monkeypatch.setattr("indexer.watcher.upsert_hash", lambda p, h: upserted.append((p, h)))
-    monkeypatch.setattr("indexer.watcher.bump_index_version", lambda: bumps.append(True))
 
     from indexer.watcher import _index_if_changed
 
@@ -130,7 +121,6 @@ def test_failed_outcome_does_not_update_fingerprint(changed_hashes: Path, monkey
 
     assert result == IndexDecision.FAILED
     assert upserted == []
-    assert bumps == []
 
 
 def test_index_file_exception_is_logged_and_returns_failed(

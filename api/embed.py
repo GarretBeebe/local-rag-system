@@ -1,8 +1,8 @@
 """
 Shared embedding helper used by both the retrieval pipeline and the ingest pipeline.
 
-Kept separate from api.retrieval to avoid loading heavy ML models (CrossEncoder,
-KeywordIndex) in contexts that only need embedding (e.g. the watcher).
+Kept separate from api.retrieval to avoid loading heavy ML models (the CrossEncoder)
+in contexts that only need embedding (e.g. the watcher).
 
 Texts are embedded as-is, without the "search_query: " / "search_document: " prefixes
 the nomic-embed-text model card asks for: on this corpus they lowered retrieval quality
@@ -30,15 +30,6 @@ def _prepare_text(text: str) -> str:
     return text
 
 
-def _validate_vector(vector: list[float]) -> list[float]:
-    if len(vector) != VECTOR_SIZE:
-        raise RuntimeError(
-            f"Embedding model {EMBED_MODEL!r} returned {len(vector)} dimensions; "
-            f"configured VECTOR_SIZE is {VECTOR_SIZE}"
-        )
-    return vector
-
-
 def embed_batch(texts: list[str]) -> list[list[float]]:
     """Return embedding vectors for multiple texts via Ollama's batch embed API."""
     if not texts:
@@ -64,7 +55,13 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
         raise RuntimeError(
             f"Batch embedding returned {len(vectors)} vectors for {len(prepared)} texts"
         )
-    return [_validate_vector(vector) for vector in vectors]
+    for vector in vectors:
+        if len(vector) != VECTOR_SIZE:
+            raise RuntimeError(
+                f"Embedding model {EMBED_MODEL!r} returned {len(vector)} dimensions; "
+                f"configured VECTOR_SIZE is {VECTOR_SIZE}"
+            )
+    return vectors
 
 
 def embed(text: str) -> list[float]:

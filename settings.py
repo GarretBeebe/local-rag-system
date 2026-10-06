@@ -79,12 +79,6 @@ WATCHER_POLL_INTERVAL_SECONDS = float(os.environ.get("WATCHER_POLL_INTERVAL_SECO
 RECALL_K = int(os.environ.get("RECALL_K", "15"))
 RERANK_K = int(os.environ.get("RERANK_K", "15"))
 FINAL_K = int(os.environ.get("FINAL_K", "4"))
-KEYWORD_REFRESH_INTERVAL = int(os.environ.get("KEYWORD_REFRESH_INTERVAL", "30"))
-KEYWORD_SEARCH_ENABLED = os.environ.get("KEYWORD_SEARCH_ENABLED", "true").lower() != "false"
-KEYWORD_INDEX_MAX_DOCS = int(os.environ.get("KEYWORD_INDEX_MAX_DOCS", "100000"))
-KEYWORD_INDEX_MAX_TOKENS = int(os.environ.get("KEYWORD_INDEX_MAX_TOKENS", "5000000"))
-KEYWORD_MIN_QUERY_TOKENS = int(os.environ.get("KEYWORD_MIN_QUERY_TOKENS", "1"))
-KEYWORD_MAX_QUERY_TOKENS = int(os.environ.get("KEYWORD_MAX_QUERY_TOKENS", "32"))
 MAX_CHUNK_CHARS = int(os.environ.get("MAX_CHUNK_CHARS", "2000"))
 MAX_MD_CHUNK = MAX_CHUNK_CHARS  # intentionally aliased — both chunkers enforce the same limit
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))
@@ -116,11 +110,6 @@ def _validate_settings() -> None:
         "RECALL_K": RECALL_K,
         "RERANK_K": RERANK_K,
         "FINAL_K": FINAL_K,
-        "KEYWORD_REFRESH_INTERVAL": KEYWORD_REFRESH_INTERVAL,
-        "KEYWORD_INDEX_MAX_DOCS": KEYWORD_INDEX_MAX_DOCS,
-        "KEYWORD_INDEX_MAX_TOKENS": KEYWORD_INDEX_MAX_TOKENS,
-        "KEYWORD_MIN_QUERY_TOKENS": KEYWORD_MIN_QUERY_TOKENS,
-        "KEYWORD_MAX_QUERY_TOKENS": KEYWORD_MAX_QUERY_TOKENS,
         "MAX_CHUNK_CHARS": MAX_CHUNK_CHARS,
         "CHUNK_SIZE": CHUNK_SIZE,
         "MAX_CHAT_MESSAGES": MAX_CHAT_MESSAGES,
@@ -158,11 +147,6 @@ def _validate_settings() -> None:
         )
     if FINAL_K > RERANK_K:
         raise ValueError(f"settings: FINAL_K must be <= RERANK_K, got {FINAL_K} > {RERANK_K}")
-    if KEYWORD_MIN_QUERY_TOKENS > KEYWORD_MAX_QUERY_TOKENS:
-        raise ValueError(
-            "settings: KEYWORD_MIN_QUERY_TOKENS must be <= KEYWORD_MAX_QUERY_TOKENS, "
-            f"got {KEYWORD_MIN_QUERY_TOKENS} > {KEYWORD_MAX_QUERY_TOKENS}"
-        )
     if MAX_CHAT_QUESTION_CHARS > MAX_CHAT_TOTAL_CHARS:
         raise ValueError(
             "settings: MAX_CHAT_QUESTION_CHARS must be <= MAX_CHAT_TOTAL_CHARS, "

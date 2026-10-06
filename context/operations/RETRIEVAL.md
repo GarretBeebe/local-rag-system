@@ -24,6 +24,11 @@ Finds conceptually related chunks.
 
 Finds exact tokens such as identifiers or configuration keys.
 
+BM25 runs inside Qdrant: every chunk carries a sparse vector that Qdrant builds
+from its text at index time (`common/qdrant.py`), so keyword search is always in
+sync with the index. Text is split on word characters before Qdrant tokenizes
+it, which keeps identifiers like `retrieve_best` whole.
+
 ## Why Hybrid Search
 
 Vector search struggles with:

@@ -92,8 +92,7 @@ The ingestion pipeline supports:
     │   ├── embed.py             ← shared embedding helper (ingest + retrieval)
     │   ├── ollama_client.py     ← per-thread Ollama HTTP sessions
     │   ├── query_rag.py
-    │   ├── retrieval.py
-    │   └── keyword_index.py
+    │   └── retrieval.py
     │
     ├── ingest/
     │   ├── chunkers.py
@@ -338,11 +337,10 @@ the relevant container (`api` or `watcher`).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `RAG_TIMING` | `0` | Set to `1` to log per-stage timings (embed, recall, rerank, generate) on every request |
+| `RAG_TIMING` | `0` | Set to `1` to log per-stage timings (embed, recall, rerank, generate) and Ollama's model-load/prefill time on every request |
 | `RECALL_K` | `15` | Number of candidates fetched from Qdrant and BM25 before reranking |
 | `RERANK_K` | `15` | Number of fused candidates the cross-encoder reranks (must be >= `FINAL_K`) |
 | `FINAL_K` | `4` | Number of chunks passed to the LLM after reranking |
-| `KEYWORD_REFRESH_INTERVAL` | `30` | Seconds between cheap checks for watcher-indexed changes; BM25 rebuilds only when indexed content changed |
 | `MAX_CHUNK_CHARS` | `2000` | Maximum characters per chunk for all chunkers (text, Python, Markdown) |
 
 Enable timing to identify which pipeline stage dominates latency:
@@ -380,8 +378,10 @@ Enable timing to identify which pipeline stage dominates latency:
 The watcher is the only ingestion path: it indexes the folders in
 `config/watcher_config.container.yaml` and keeps them in sync.
 
-Reset and rebuild the collection (also clears the fingerprint store). Stop the
-watcher first: a running watcher remembers the old collection and would fail
+Reset and rebuild the collection (also clears the fingerprint store). This is
+required once when upgrading to the dense + BM25 collection layout: the watcher
+refuses an older collection with an error naming `ingest.reset_collection`, and
+queries fail until the rebuild finishes. Stop the watcher first: a running watcher remembers the old collection and would fail
 every write after the reset, and only a restart triggers a full re-scan.
 
     docker compose stop watcher
@@ -550,7 +550,7 @@ Chatbox configuration
 The query pipeline runs these stages in sequence:
 
 1.  Query embedding (Ollama)
-2.  Hybrid recall — Qdrant vector search + BM25 keyword search
+2.  Hybrid recall — Qdrant vector search + Qdrant BM25 keyword search (sparse vectors)
 3.  Reciprocal Rank Fusion of both lists; chunks with identical text count once
 4.  Cross-encoder reranking of the top `RERANK_K` (CPU)
 5.  Prompt assembly and LLM generation (Ollama, streamed)
@@ -561,8 +561,7 @@ Implemented latency improvements:
 | --- | --- |
 | True Ollama streaming | First token delivered as generation starts, not after full completion |
 | Per-thread HTTP sessions | One `requests.Session` per RAG worker thread — TCP connections to Ollama reused without contention |
-| BM25 `heapq.nlargest` | Partial top-k sort replaces full O(n log n) sort on every query |
-| Zero-score BM25 filter | Irrelevant keyword results excluded before reranking |
+| Keyword search in Qdrant | BM25 sparse vectors are built by Qdrant as chunks are indexed: no in-process copy of the corpus, no full rebuilds on every file change, no refresh lag |
 | Rank fusion + text dedupe | Vector and keyword lists merged by RRF; exact-duplicate chunks (same file indexed twice) removed before the cross-encoder |
 | Reranker batch size 8 | Length-sorted small batches avoid padding waste (~2.4x faster reranking) |
 | Reduced default candidate counts | recall\_k 30→15, mmr\_k 10→8, final\_k 6→4 |

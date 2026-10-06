@@ -2,7 +2,7 @@
 Multi-stage retrieval pipeline: hybrid recall, rank fusion, and reranking.
 
 Pipeline stages:
-  1. hybrid_recall  — Qdrant vector search and BM25 keyword search, run side by side
+  1. hybrid_recall  — Qdrant vector search and Qdrant BM25 keyword search, side by side
   2. _fuse          — Reciprocal Rank Fusion merges both ranked lists and drops chunks
                       whose text is an exact duplicate (e.g. the same file indexed twice)
   3. rerank         — scores (question, chunk) pairs with a cross-encoder model
@@ -15,17 +15,17 @@ import difflib
 import logging
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from qdrant_client import models
 from qdrant_client.models import FieldCondition, Filter, MatchAny
 from sentence_transformers import CrossEncoder
 
 from api.embed import embed
-from api.keyword_index import KeywordIndex, KeywordResult
 from api.timing import timed as _timed
-from common.qdrant import get_qdrant_client
+from common.qdrant import DENSE_VECTOR, SPARSE_VECTOR, bm25_document, get_qdrant_client
 from settings import COLLECTION, FINAL_K, RECALL_K, RERANK_K, RERANK_MODEL
 
 logger = logging.getLogger(__name__)
@@ -40,17 +40,17 @@ class Chunk:
     id: str | int
     payload: dict[str, Any]
     score: float
-    rerank_score: float | None = field(default=None)
+    rerank_score: float | None = None
 
 
 _reranker: CrossEncoder | None = None
 _reranker_lock = threading.Lock()
-_reranker_model_name = RERANK_MODEL
-_keyword_index: KeywordIndex | None = None
 
 # A "name.ext" token in the question; 1-letter extensions cover .c and .h files.
 _FILENAME_RE = re.compile(r"\b([\w.-]+\.[a-zA-Z]{1,5})\b")
 _FILENAME_FUZZY_CUTOFF = 0.75
+# Upper bound on distinct indexed filenames fetched for filename matching (facet default: 10).
+_FILENAME_FACET_LIMIT = 100_000
 # Standard Reciprocal Rank Fusion constant; damps the advantage of the very top ranks.
 _RRF_K = 60
 # CrossEncoder.predict length-sorts pairs before batching, so small batches keep short
@@ -58,38 +58,29 @@ _RRF_K = 60
 _RERANK_BATCH_SIZE = 8
 
 
-def startup(rerank_model: str = RERANK_MODEL) -> None:
-    """Start retrieval support services. The reranker model loads on first use."""
-    global _reranker, _reranker_model_name, _keyword_index
-    if _reranker_model_name != rerank_model:
-        _reranker = None
-    _reranker_model_name = rerank_model
-    _keyword_index = KeywordIndex()
-    _keyword_index.start()
-
-
-def shutdown() -> None:
-    """Stop retrieval support services. Call from FastAPI lifespan cleanup."""
-    global _keyword_index
-    if _keyword_index is not None:
-        _keyword_index.stop()
-        _keyword_index = None
-
-
 def _get_reranker() -> CrossEncoder:
+    """Return the cross-encoder, loading it on first use."""
     global _reranker
     if _reranker is None:
         with _reranker_lock:
             if _reranker is None:
-                logger.info("Loading reranker model: %s", _reranker_model_name)
-                _reranker = CrossEncoder(_reranker_model_name, device="cpu")
+                logger.info("Loading reranker model: %s", RERANK_MODEL)
+                _reranker = CrossEncoder(RERANK_MODEL, device="cpu")
     return _reranker
 
 
-def _get_keyword_index() -> KeywordIndex:
-    if _keyword_index is None:
-        raise RuntimeError("api.retrieval.startup() has not been called")
-    return _keyword_index
+def _known_filenames() -> list[str]:
+    """Return every distinct indexed filename (needs the keyword index on `filename`)."""
+    try:
+        with _timed("filename_lookup"):
+            response = get_qdrant_client().facet(
+                collection_name=COLLECTION, key="filename", limit=_FILENAME_FACET_LIMIT, exact=True
+            )
+    except Exception as e:
+        # Filename matching only narrows the search; without it, the query still runs.
+        logger.warning("Filename lookup failed: %s: %s", type(e).__name__, e)
+        return []
+    return [str(hit.value) for hit in response.hits]
 
 
 def _extract_filenames(question: str) -> list[str]:
@@ -98,7 +89,7 @@ def _extract_filenames(question: str) -> list[str]:
     if not candidates:
         return []
     by_lower: dict[str, list[str]] = {}
-    for name in _get_keyword_index().known_filenames:
+    for name in _known_filenames():
         by_lower.setdefault(name.lower(), []).append(name)
     for candidate in candidates:
         if candidate in by_lower:
@@ -113,6 +104,20 @@ def _extract_filenames(question: str) -> list[str]:
     return []
 
 
+def _query_points(
+    query: list[float] | models.Document, using: str, limit: int, query_filter: Filter | None
+) -> list[Chunk]:
+    res = get_qdrant_client().query_points(
+        collection_name=COLLECTION,
+        query=query,
+        using=using,
+        query_filter=query_filter,
+        limit=limit,
+        with_payload=True,
+    )
+    return [Chunk(id=p.id, score=p.score, payload=p.payload) for p in res.points]
+
+
 def qdrant_recall(
     question_vec: list[float],
     limit: int = RECALL_K,
@@ -121,18 +126,24 @@ def qdrant_recall(
     """Returns the nearest chunks by vector similarity."""
     with _timed("qdrant_recall"):
         try:
-            res = get_qdrant_client().query_points(
-                collection_name=COLLECTION,
-                query=question_vec,
-                query_filter=query_filter,
-                limit=limit,
-                with_payload=True,
-            )
-            results = [Chunk(id=p.id, score=p.score, payload=p.payload) for p in res.points]
+            return _query_points(question_vec, DENSE_VECTOR, limit, query_filter)
         except Exception as e:
             logger.error("Qdrant vector recall failed: %s: %s", type(e).__name__, e)
             raise RetrievalError(str(e)) from e
-    return results
+
+
+def keyword_recall(
+    question: str,
+    limit: int = RECALL_K,
+    query_filter: Filter | None = None,
+) -> list[Chunk]:
+    """Returns the best BM25 matches; on failure, retrieval degrades to vector results only."""
+    with _timed("keyword_recall"):
+        try:
+            return _query_points(bm25_document(question), SPARSE_VECTOR, limit, query_filter)
+        except Exception as e:
+            logger.error("BM25 keyword search failed: %s: %s", type(e).__name__, e)
+            return []
 
 
 def rerank(question: str, candidates: list[Chunk], top_n: int = FINAL_K) -> list[Chunk]:
@@ -162,21 +173,10 @@ def hybrid_recall(
         if filenames
         else None
     )
-    vector_results = qdrant_recall(question_vec, limit=limit, query_filter=query_filter)
-
-    keyword_results: list[KeywordResult]
-    try:
-        keyword_results = _get_keyword_index().search(question, limit=limit)
-    except Exception as e:
-        logger.error("BM25 keyword search failed: %s: %s", type(e).__name__, e)
-        keyword_results = []
-    if filenames:
-        keyword_results = [r for r in keyword_results if r["payload"].get("filename") in filenames]
-
-    keyword_chunks = [
-        Chunk(id=r["id"], payload=r["payload"], score=r["bm25_score"]) for r in keyword_results
-    ]
-    return vector_results, keyword_chunks
+    return (
+        qdrant_recall(question_vec, limit=limit, query_filter=query_filter),
+        keyword_recall(question, limit=limit, query_filter=query_filter),
+    )
 
 
 def _fuse(*ranked_lists: list[Chunk]) -> list[Chunk]:
@@ -187,7 +187,6 @@ def _fuse(*ranked_lists: list[Chunk]) -> list[Chunk]:
     cannot add up. Chunks without text are dropped. The fused score replaces Chunk.score.
     """
     fused: dict[str, Chunk] = {}
-    scores: dict[str, float] = {}
     for ranked in ranked_lists:
         seen: set[str] = set()
         for chunk in ranked:
@@ -195,11 +194,11 @@ def _fuse(*ranked_lists: list[Chunk]) -> list[Chunk]:
             if not text or text in seen:
                 continue
             seen.add(text)
-            rank = len(seen)
-            fused.setdefault(text, chunk)
-            scores[text] = scores.get(text, 0.0) + 1.0 / (_RRF_K + rank)
-    for text, chunk in fused.items():
-        chunk.score = scores[text]
+            rank = len(seen)  # position among this list's distinct texts
+            if text not in fused:
+                chunk.score = 0.0
+                fused[text] = chunk
+            fused[text].score += 1.0 / (_RRF_K + rank)
     return sorted(fused.values(), key=lambda c: c.score, reverse=True)
 
 
@@ -215,10 +214,9 @@ def retrieve_best(
     with _timed("embed"):
         qvec = embed(question)
 
-    with _timed("hybrid_recall"):
-        vector_results, keyword_results = hybrid_recall(
-            question, qvec, limit=recall_k, filenames=filenames
-        )
+    vector_results, keyword_results = hybrid_recall(
+        question, qvec, limit=recall_k, filenames=filenames
+    )
 
     # Rerank at least final_k candidates: /v1/retrieve may ask for more than RERANK_K.
     candidates = _fuse(vector_results, keyword_results)[: max(rerank_k, final_k)]

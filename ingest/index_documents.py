@@ -18,14 +18,16 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
+    Modifier,
     PayloadSchemaType,
     PointStruct,
+    SparseVectorParams,
     VectorParams,
 )
 
 from api.embed import embed_batch
 from common.paths import normalize_path
-from common.qdrant import get_qdrant_client
+from common.qdrant import DENSE_VECTOR, SPARSE_VECTOR, bm25_document, get_qdrant_client
 from common.types import IndexDecision
 from indexer.fingerprint_store import delete_hash
 from ingest.chunkers import chunk_document
@@ -44,11 +46,20 @@ def ensure_collection() -> None:
     if _collection_ensured:
         return
     client = get_qdrant_client()
-    if not client.collection_exists(COLLECTION):
+    if client.collection_exists(COLLECTION):
+        sparse = client.get_collection(COLLECTION).config.params.sparse_vectors or {}
+        if SPARSE_VECTOR not in sparse:
+            raise RuntimeError(
+                f"Collection {COLLECTION!r} predates the dense + BM25 vector layout; "
+                "run ingest.reset_collection to rebuild it"
+            )
+    else:
         logger.info("Collection missing — creating new collection")
         client.create_collection(
             collection_name=COLLECTION,
-            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            vectors_config={DENSE_VECTOR: VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)},
+            # IDF is computed by Qdrant from collection statistics at query time.
+            sparse_vectors_config={SPARSE_VECTOR: SparseVectorParams(modifier=Modifier.IDF)},
         )
         # Qdrant recommends indexing filter fields before points arrive: stale-vector deletes
         # match on filepath, and filename-aware retrieval filters on filename.
@@ -83,7 +94,8 @@ def _embed_chunks(
     return [
         PointStruct(
             id=str(uuid.uuid4()),
-            vector=vec,
+            # The filename is part of the BM25 text so filename queries match keywords too.
+            vector={DENSE_VECTOR: vec, SPARSE_VECTOR: bm25_document(f"{path.name} {chunk}")},
             payload={
                 "text": chunk,
                 "document_id": document_id,

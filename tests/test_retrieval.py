@@ -1,9 +1,25 @@
 """Unit tests for retrieval pipeline pure logic (rank fusion, filename detection, reranking)."""
 
-# conftest.py patches sentence_transformers and KeywordIndex._build before
-# this module is imported, so api.retrieval loads without side effects.
+from unittest.mock import MagicMock
+
+import pytest
+from qdrant_client import models
+
+# conftest.py stubs sentence_transformers before this module is imported,
+# so api.retrieval loads without loading a model.
 import api.retrieval as retrieval
-from api.retrieval import Chunk, _extract_filenames, _fuse, rerank, retrieve_best
+from api.retrieval import (
+    Chunk,
+    _extract_filenames,
+    _fuse,
+    _known_filenames,
+    hybrid_recall,
+    keyword_recall,
+    qdrant_recall,
+    rerank,
+    retrieve_best,
+)
+from common.qdrant import DENSE_VECTOR, SPARSE_VECTOR
 
 
 def _chunk(id: str, text: str, score: float = 1.0) -> Chunk:
@@ -46,10 +62,7 @@ def test_fuse_stores_fused_score():
 
 
 def _set_known_filenames(monkeypatch, names: set[str]) -> None:
-    class FakeKeywordIndex:
-        known_filenames = names
-
-    monkeypatch.setattr(retrieval, "_keyword_index", FakeKeywordIndex())
+    monkeypatch.setattr(retrieval, "_known_filenames", lambda: sorted(names))
 
 
 def test_extract_filenames_matches_case_insensitively(monkeypatch):
@@ -76,7 +89,13 @@ def test_extract_filenames_without_candidate_returns_empty(monkeypatch):
 # --- retrieve_best ---
 
 
-def test_retrieve_best_reranks_fused_candidates_up_to_rerank_k(monkeypatch):
+@pytest.mark.parametrize(
+    ("rerank_k", "final_k", "reranked_n"),
+    [(4, 2, 4), (3, 6, 6)],  # second case: /v1/retrieve asking for more than RERANK_K
+)
+def test_retrieve_best_reranks_max_of_rerank_k_and_final_k(
+    monkeypatch, rerank_k, final_k, reranked_n
+):
     vector = [_chunk(f"v{i}", f"vector text {i}") for i in range(5)]
     keyword = [_chunk(f"k{i}", f"keyword text {i}") for i in range(5)]
     reranked = []
@@ -85,58 +104,17 @@ def test_retrieve_best_reranks_fused_candidates_up_to_rerank_k(monkeypatch):
         reranked.extend(candidates)
         return candidates[:top_n]
 
-    _set_known_filenames(monkeypatch, set())
     monkeypatch.setattr(retrieval, "embed", lambda q: [0.0])
     monkeypatch.setattr(retrieval, "hybrid_recall", lambda *a, **kw: (vector, keyword))
     monkeypatch.setattr(retrieval, "rerank", fake_rerank)
 
-    result = retrieve_best("q", rerank_k=4, final_k=2)
+    result = retrieve_best("q", rerank_k=rerank_k, final_k=final_k)
 
-    assert len(reranked) == 4
-    assert len(result) == 2
-
-
-def test_retrieve_best_reranks_at_least_final_k_candidates(monkeypatch):
-    vector = [_chunk(f"v{i}", f"text {i}") for i in range(10)]
-    reranked = []
-
-    def fake_rerank(question, candidates, top_n):
-        reranked.extend(candidates)
-        return candidates[:top_n]
-
-    _set_known_filenames(monkeypatch, set())
-    monkeypatch.setattr(retrieval, "embed", lambda q: [0.0])
-    monkeypatch.setattr(retrieval, "hybrid_recall", lambda *a, **kw: (vector, []))
-    monkeypatch.setattr(retrieval, "rerank", fake_rerank)
-
-    retrieve_best("q", rerank_k=3, final_k=6)
-
-    assert len(reranked) == 6
+    assert len(reranked) == reranked_n
+    assert len(result) == final_k
 
 
 # --- reranker lifecycle ---
-
-
-def test_startup_does_not_load_reranker(monkeypatch):
-    constructed = []
-
-    class FakeCrossEncoder:
-        def __init__(self, *args, **kwargs):
-            constructed.append((args, kwargs))
-
-    class FakeKeywordIndex:
-        known_filenames = set()
-
-        def start(self):
-            pass
-
-    monkeypatch.setattr(retrieval, "CrossEncoder", FakeCrossEncoder)
-    monkeypatch.setattr(retrieval, "KeywordIndex", FakeKeywordIndex)
-    monkeypatch.setattr(retrieval, "_reranker", None)
-
-    retrieval.startup("test-reranker")
-
-    assert constructed == []
 
 
 def test_rerank_loads_reranker_on_first_use(monkeypatch):
@@ -151,7 +129,7 @@ def test_rerank_loads_reranker_on_first_use(monkeypatch):
 
     monkeypatch.setattr(retrieval, "CrossEncoder", FakeCrossEncoder)
     monkeypatch.setattr(retrieval, "_reranker", None)
-    monkeypatch.setattr(retrieval, "_reranker_model_name", "test-reranker")
+    monkeypatch.setattr(retrieval, "RERANK_MODEL", "test-reranker")
 
     result = rerank("hello", [_chunk("a", "world")])
 
@@ -173,3 +151,59 @@ def test_rerank_sorts_by_score_and_uses_small_batches(monkeypatch):
 
     assert [c.payload["text"] for c in result] == ["high", "mid"]
     assert calls == [retrieval._RERANK_BATCH_SIZE]
+
+
+# --- Qdrant recall (dense + BM25 sparse vectors) ---
+
+
+def _mock_client(monkeypatch, **behaviour) -> MagicMock:
+    client = MagicMock(**{"query_points.return_value.points": [], **behaviour})
+    monkeypatch.setattr(retrieval, "get_qdrant_client", lambda: client)
+    return client
+
+
+def test_keyword_recall_queries_bm25_vector_with_word_split_text(monkeypatch):
+    client = _mock_client(monkeypatch)
+
+    keyword_recall("What does retrieve_best() do?")
+
+    kwargs = client.query_points.call_args.kwargs
+    assert kwargs["using"] == SPARSE_VECTOR
+    assert isinstance(kwargs["query"], models.Document)
+    assert kwargs["query"].text == "What does retrieve_best do"
+    assert kwargs["query"].model == "Qdrant/bm25"
+
+
+def test_qdrant_recall_queries_dense_vector(monkeypatch):
+    client = _mock_client(monkeypatch)
+
+    qdrant_recall([0.1, 0.2])
+
+    assert client.query_points.call_args.kwargs["using"] == DENSE_VECTOR
+
+
+def test_hybrid_recall_applies_filename_filter_to_both_searches(monkeypatch):
+    client = _mock_client(monkeypatch)
+
+    hybrid_recall("summarize readme.md", [0.1], filenames=["README.md", "readme.md"])
+
+    filters = [c.kwargs["query_filter"] for c in client.query_points.call_args_list]
+    assert len(filters) == 2
+    assert all(f.must[0].match.any == ["README.md", "readme.md"] for f in filters)
+
+
+def test_keyword_recall_failure_degrades_to_no_keyword_results(monkeypatch):
+    _mock_client(monkeypatch, **{"query_points.side_effect": RuntimeError("inference failed")})
+    assert keyword_recall("anything") == []
+
+
+def test_known_filenames_reads_facet_values(monkeypatch):
+    client = _mock_client(monkeypatch)
+    client.facet.return_value.hits = [MagicMock(value="README.md"), MagicMock(value="a.py")]
+    assert _known_filenames() == ["README.md", "a.py"]
+    assert client.facet.call_args.kwargs["key"] == "filename"
+
+
+def test_known_filenames_failure_returns_empty(monkeypatch):
+    _mock_client(monkeypatch, **{"facet.side_effect": RuntimeError("no index")})
+    assert _known_filenames() == []
